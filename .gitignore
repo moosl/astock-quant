@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv / venv
+.venv/
+venv/
+env/
+uv.lock
+
+# 项目运行产物 —— 不进版本控制
+data_cache/*
+!data_cache/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
+
+# 部署：docs/ 进 git，但其内部 .DS_Store / __pycache__ 等仍排除（下方 OS / IDE 段已覆盖）
+# 注意：不要在这里写 docs/* 排除规则，否则部署失效
+
+# notebook checkpoints
+.ipynb_checkpoints/
+
+# 环境变量与密钥（M0 红线 —— security-reviewer 必审）
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+credentials.json
+secrets/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统 / 临时
+.claude/
+.omc/
+.debug/
+*.tmp
+*.bak
+*.log
+
+# 内部协作笔记 —— 不公开（用户 2026-05-20 决定）
+审核/

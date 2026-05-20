@@ -1,0 +1,47 @@
+[project]
+name = "astock-quant"
+version = "0.1.0"
+description = "A股 量化预测系统 —— 学习/研究用。传统量化 ML 为核心 + LLM 做情绪/事件因子。"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Stage 1 直接依赖刻意保持精简 —— 无重框架（不引 langchain / langgraph / backtrader）。
+# 框架代码作为「实现参考」放在 .p0-repos/，研读后重写，不作为 pip 依赖。
+# 详见 P1-架构设计.md 第 1、6 节。
+dependencies = [
+    "pandas>=2.0",        # 数据处理、panel 数据集
+    "numpy>=1.26",        # 数值计算
+    "pydantic>=2.0",      # 数据契约 contracts.py
+    "lightgbm>=4.0",      # ① 二分类模型（及后续 ②③④）—— 核心预测引擎
+    "scikit-learn>=1.4",  # 切分工具、评估指标、预处理
+    "mootdx>=0.11",       # A股 行情/财务（TCP 通达信）—— a_stock.py 同款
+    "akshare>=1.12",      # A股 财报三表/新闻/一致预期
+    "requests>=2.31",     # 腾讯财经/东财 等 HTTP 端点
+    "stockstats>=0.6",    # 技术指标计算（RSI/MACD/BOLL/ATR）—— a_stock.py 同款
+    "matplotlib>=3.8",    # 回测净值曲线/因子分布可视化（学习用，看得见结果）
+    "python-dateutil>=2.8",  # 日期处理
+    "anthropic>=0.40",    # P6 LLM 情绪因子（默认 provider）—— 通过 ENABLE_LLM_FACTOR 开关
+    "python-dotenv>=1.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",        # 测试
+    "ruff>=0.4",          # lint + format（统一代码风格）
+    "ipykernel>=6.29",    # notebook 走读（可选）
+]
+# Stage 2（P6）LLM 情绪因子可能新增 LLM SDK —— 届时再加，见 P1-架构设计.md 第 6.4 节。
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["astock_quant"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

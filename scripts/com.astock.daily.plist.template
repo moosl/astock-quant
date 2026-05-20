@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A股每日预测 launchd plist 模板
+  使用前将所有 {project_root} 替换为项目绝对路径，例如：
+    sed -i '' 's|{project_root}|/Users/yourname/claude code/量化|g' com.astock.daily.plist
+  然后复制到 ~/Library/LaunchAgents/ 并加载，详见 scripts/README.md
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.astock.daily</string>
+
+    <!-- 每天 16:30 触发（A股 16:00 收盘，留 30 分钟等数据更新） -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>16</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <!-- 工作目录设为项目根 -->
+    <key>WorkingDirectory</key>
+    <string>{project_root}</string>
+
+    <!-- 用 wrapper 脚本驱动：负责通知 + 错误日志 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>bash</string>
+        <string>-c</string>
+        <string>cd {project_root} &amp;&amp; bash scripts/daily_predict_wrapper.sh 2&gt;&gt;artifacts/daily_reports/launchd_stderr.log | tee -a artifacts/daily_reports/launchd_stdout.log</string>
+    </array>
+
+    <!-- 日志（launchd 层的原始 stdout/stderr） -->
+    <key>StandardOutPath</key>
+    <string>{project_root}/artifacts/daily_reports/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>{project_root}/artifacts/daily_reports/launchd_stderr.log</string>
+
+    <!-- 不开机就跑 -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- 失败后不自动重启（等明天） -->
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>
