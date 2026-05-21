@@ -65,15 +65,21 @@ def factor_frames(panels):
     price_full, mf_full, fins_full = panels["full"]
     price_trunc, mf_trunc, fins_trunc = panels["trunc"]
 
+    # drop_nan_threshold=1.1 关闭 drop-NaN：no-lookahead 测试要在「固定 26 因子集」
+    # 下验证截断 vs 全量的 bit-exact 一致性。drop-NaN 会随数据量波动（全量数据
+    # drop 8 列、截断数据 drop 13 列），破坏「因子集稳定」这一测试前提，故在此
+    # 测试套件里关闭它，单独测纯因子计算的 no-lookahead 正确性。
     ff_full = compute_factor_frame(
         price_panel=price_full,
         moneyflow_panel=mf_full,
         financials=fins_full,
+        drop_nan_threshold=1.1,
     )
     ff_trunc = compute_factor_frame(
         price_panel=price_trunc,
         moneyflow_panel=mf_trunc,
         financials=fins_trunc,
+        drop_nan_threshold=1.1,
     )
     return ff_full, ff_trunc
 
