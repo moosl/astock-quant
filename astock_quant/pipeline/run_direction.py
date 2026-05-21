@@ -374,29 +374,55 @@ def _resolve_predict_model_path(
     model_type: str,
     predict_model_path: str | None,
     predict_date: str | None,
+    models_dir: Path | None = None,
 ) -> Path:
     """解析 predict_only 模式下要加载的模型文件路径.
 
     优先级：
-        1. predict_model_path 显式给定 → 直接用
-        2. 否则按 `artifacts/models/{model_type}_{predict_date}.lgb` 解析
-        3. predict_date 为 None → 用今天日期（系统时区）
-
-    解析后必须文件存在，否则 raise FileNotFoundError 给出明确「先跑训练」提示。
+        1. predict_model_path 显式给定 → 直接用（不存在才报错）
+        2. 否则按 `{models_dir}/{model_type}_{predict_date}.lgb` 解析
+        3. 当天模型不存在 → fallback 到最近一个 `{model_type}_*.lgb`
+           （P23 fix：模型不必每天重训，daily.py 自动复用最近的模型，
+            避免「当天没训练 → daily.py FileNotFoundError → 报告永远出不来」。
+            这正是早期 launchd 自动跑却没产出报告的根因之一。）
+        4. 一个模型都没有 → raise FileNotFoundError，给「先跑训练」引导
     """
+    # 运行时取 DEFAULT_MODELS_DIR（不能用作默认参数值 —— 那样会在函数定义时
+    # 绑死，monkeypatch 模块变量将失效）
+    if models_dir is None:
+        models_dir = DEFAULT_MODELS_DIR
+
     if predict_model_path is not None:
         path = Path(predict_model_path)
-    else:
-        date_str = predict_date or _dt.date.today().isoformat()
-        path = DEFAULT_MODELS_DIR / f"{model_type}_{date_str}.lgb"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"predict_only 模式找不到模型文件: {path}\n"
-            f"请先跑一次训练并 save 到该路径：\n"
-            f"  uv run python -c \"from astock_quant.pipeline.run_direction import run_direction; "
-            f"run_direction(save_model_to='{path}')\""
+        if not path.exists():
+            raise FileNotFoundError(
+                f"predict_only 模式找不到显式指定的模型文件: {path}"
+            )
+        return path
+
+    date_str = predict_date or _dt.date.today().isoformat()
+    path = models_dir / f"{model_type}_{date_str}.lgb"
+    if path.exists():
+        return path
+
+    # fallback：当天没有模型 → 用最近一个可用的
+    # 文件名含 ISO 日期（YYYY-MM-DD），字典序 == 日期序，sorted()[-1] 即最新
+    candidates = sorted(models_dir.glob(f"{model_type}_*.lgb"))
+    if candidates:
+        fallback = candidates[-1]
+        logger.warning(
+            "predict_only：当天模型 %s 不存在，fallback 用最近的 %s",
+            path.name, fallback.name,
         )
-    return path
+        return fallback
+
+    raise FileNotFoundError(
+        f"predict_only 模式找不到任何 {model_type} 模型文件："
+        f"{models_dir}/{model_type}_*.lgb\n"
+        f"请先跑一次训练并 save：\n"
+        f"  uv run python -c \"from astock_quant.pipeline.run_direction import run_direction; "
+        f"run_direction(save_model_to='{path}')\""
+    )
 
 
 def _run_direction_predict_only(

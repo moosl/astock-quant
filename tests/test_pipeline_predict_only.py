@@ -253,35 +253,77 @@ class TestPredictOnlySkipsFit:
 
 
 # ---------------------------------------------------------------------------
-# 命门 2：模型文件缺失时抛 FileNotFoundError，含引导信息
+# 命门 2：模型路径解析 —— 当天模型缺失时 fallback 到最近可用（P23）
 # ---------------------------------------------------------------------------
+#
+# P23 之前：当天没有 {type}_{date}.lgb → 直接 FileNotFoundError → daily.py 全挂
+#           → launchd 自动跑也产不出报告（早期「连续几天没报告」的根因之一）。
+# P23 之后：当天模型缺失 → fallback 到最近一个 {type}_*.lgb，daily.py 照常出报告。
+#           只有「一个模型都没有」时才 raise（含「先跑训练」引导）。
 
-class TestPredictOnlyMissingModel:
+class TestResolvePredictModelPath:
+    """直接单元测 _resolve_predict_model_path：精确日期 → fallback → 全无报错."""
 
-    def _assert_missing_model_error(self, run_fn, predict_date: str = "2099-01-01"):
+    @staticmethod
+    def _touch(d, name):
+        f = d / name
+        f.write_bytes(b"")
+        return f
+
+    def test_exact_date_model_used(self, tmp_path):
+        """当天模型存在 → 直接用当天的，不 fallback."""
+        from astock_quant.pipeline.run_direction import _resolve_predict_model_path
+        self._touch(tmp_path, "direction_2026-05-19.lgb")
+        self._touch(tmp_path, "direction_2026-05-21.lgb")
+        got = _resolve_predict_model_path("direction", None, "2026-05-21", models_dir=tmp_path)
+        assert got.name == "direction_2026-05-21.lgb"
+
+    def test_fallback_to_latest_when_date_missing(self, tmp_path, caplog):
+        """当天模型不存在 → fallback 到最近一个，并 log warning."""
+        import logging
+        from astock_quant.pipeline.run_direction import _resolve_predict_model_path
+        self._touch(tmp_path, "direction_2026-05-16.lgb")
+        self._touch(tmp_path, "direction_2026-05-19.lgb")
+        with caplog.at_level(logging.WARNING):
+            got = _resolve_predict_model_path("direction", None, "2026-05-21", models_dir=tmp_path)
+        assert got.name == "direction_2026-05-19.lgb"  # 最近的，不是 05-16
+        assert any("fallback" in r.message for r in caplog.records)
+
+    def test_raises_when_no_model_at_all(self, tmp_path):
+        """一个模型都没有 → raise FileNotFoundError，含「先跑训练」引导."""
+        from astock_quant.pipeline.run_direction import _resolve_predict_model_path
         with pytest.raises(FileNotFoundError) as exc_info:
-            run_fn(predict_only=True, predict_date=predict_date, verbose=False)
+            _resolve_predict_model_path("direction", None, "2026-05-21", models_dir=tmp_path)
         msg = str(exc_info.value)
-        assert "predict_only" in msg or "模型文件" in msg or "找不到" in msg, \
-            f"错误信息没有说明是 predict_only 模式问题: {msg}"
-        assert "先跑" in msg or "训练" in msg or "save" in msg, \
-            f"错误信息没有给出「先跑训练」引导: {msg}"
+        assert "先跑" in msg or "训练" in msg or "save" in msg
 
-    def test_run_direction_missing_model_raises(self):
-        from astock_quant.pipeline.run_direction import run_direction
-        self._assert_missing_model_error(run_direction)
+    def test_explicit_path_used(self, tmp_path):
+        """显式 predict_model_path 存在 → 直接用，跳过 date 解析."""
+        from astock_quant.pipeline.run_direction import _resolve_predict_model_path
+        p = self._touch(tmp_path, "my_custom_model.lgb")
+        got = _resolve_predict_model_path("direction", str(p), None, models_dir=tmp_path)
+        assert got == p
 
-    def test_run_return_missing_model_raises(self):
-        from astock_quant.pipeline.run_return import run_return
-        self._assert_missing_model_error(run_return)
+    def test_explicit_path_missing_raises(self, tmp_path):
+        """显式 predict_model_path 不存在 → raise FileNotFoundError."""
+        from astock_quant.pipeline.run_direction import _resolve_predict_model_path
+        with pytest.raises(FileNotFoundError):
+            _resolve_predict_model_path(
+                "direction", str(tmp_path / "nope.lgb"), None, models_dir=tmp_path
+            )
 
-    def test_run_ranking_missing_model_raises(self):
-        from astock_quant.pipeline.run_ranking import run_ranking
-        self._assert_missing_model_error(run_ranking)
-
-    def test_run_trade_signal_missing_model_raises(self):
-        from astock_quant.pipeline.run_trade_signal import run_trade_signal
-        self._assert_missing_model_error(run_trade_signal)
+    def test_all_four_pipelines_have_fallback(self, tmp_path):
+        """4 个 pipeline 的 _resolve 都支持 fallback（防漏改某一个）."""
+        from astock_quant.pipeline.run_direction import _resolve_predict_model_path as rd
+        from astock_quant.pipeline.run_ranking import _resolve_predict_model_path as rk
+        from astock_quant.pipeline.run_return import _resolve_predict_model_path as rr
+        from astock_quant.pipeline.run_trade_signal import _resolve_predict_model_path as rt
+        cases = [(rd, "direction"), (rr, "return_"), (rk, "ranking"), (rt, "trade_signal")]
+        for _, mt in cases:
+            self._touch(tmp_path, f"{mt}_2026-05-19.lgb")
+        for fn, mt in cases:
+            got = fn(mt, None, "2099-01-01", models_dir=tmp_path)
+            assert got.name == f"{mt}_2026-05-19.lgb", f"{mt} fallback 没生效"
 
 
 # ---------------------------------------------------------------------------
