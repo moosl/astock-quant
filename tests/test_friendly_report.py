@@ -116,16 +116,14 @@ class TestHtmlTodaySummaryBeforeDisclaimer:
 
 
 # ---------------------------------------------------------------------------
-# 命门 2：诚信声明每个 metric 后有 "→ 📖" 翻译箭头
+# 命门 2：_translate_metric 动态翻译指标
+#
+# 注：2026-05-22 用户决策移除报告里的旧涨跌预测章节后，诚信声明里的「实验性指标表」
+# 也一并删了，渲染后的报告不再出现「→ 📖」箭头。_translate_metric 函数本身保留
+# （仍有单测覆盖），下面这几个 test 直接测函数，不再断言渲染产物。
 # ---------------------------------------------------------------------------
 
 class TestDisclaimerMetricTranslationArrow:
-
-    def test_disclaimer_contains_translation_arrow(self, tmp_path):
-        """诚信声明含 '→ 📖' 翻译箭头（动态翻译已接入）。"""
-        html = _render_html(_make_full_results(), tmp_path)
-        assert "→" in html and "📖" in html, \
-            "诚信声明缺少 '→ 📖' 翻译箭头，可能动态翻译未接入"
 
     def test_translate_metric_auc_produces_translation(self):
         """_translate_metric('auc', 0.5131) 返回含 📖 的翻译字符串。"""
@@ -151,12 +149,24 @@ class TestDisclaimerMetricTranslationArrow:
 # 命门 3：表格 ticker 列含中文名
 # ---------------------------------------------------------------------------
 
+def _results_with_value_picks() -> dict:
+    """带 value_picks 的 results —— §1 价值名单是报告里展示 ticker 中文名的地方。"""
+    results = _make_full_results()
+    results["value_picks"] = [
+        {"ticker": "600519", "composite_score": 0.85, "pe": 26.0, "pb": 8.0,
+         "roe": 28.0, "reason": "盈利质量强"},
+        {"ticker": "000858", "composite_score": 0.72, "pe": 20.0, "pb": 5.0,
+         "roe": 22.0, "reason": "估值合理"},
+    ]
+    return results
+
+
 class TestTickerTableContainsChineseName:
 
     def test_html_ticker_display_contains_chinese_name(self, tmp_path):
-        """HTML 里 ticker 旁含至少 1 个中文股票名（不只 code）。"""
-        html = _render_html(_make_full_results(), tmp_path)
-        # 600519 → 贵州茅台，000858 → 五粮液 等都应出现
+        """HTML 里 ticker 旁含至少 1 个中文股票名（§1 价值名单接入 ticker_names）。"""
+        html = _render_html(_results_with_value_picks(), tmp_path)
+        # 600519 → 贵州茅台，000858 → 五粮液
         chinese_names = ["贵州茅台", "五粮液", "隆基绿能", "宁德时代"]
         found = [name for name in chinese_names if name in html]
         assert found, (
@@ -165,32 +175,21 @@ class TestTickerTableContainsChineseName:
         )
 
     def test_md_ticker_display_contains_chinese_name(self, tmp_path):
-        """MD 里 ticker 旁含中文名。"""
-        md = _render_md(_make_full_results(), tmp_path)
+        """MD 里 ticker 旁含中文名（§1 价值名单）。"""
+        md = _render_md(_results_with_value_picks(), tmp_path)
         chinese_names = ["贵州茅台", "五粮液", "隆基绿能"]
         found = [name for name in chinese_names if name in md]
         assert found, f"MD 里未找到任何中文股票名，检查过：{chinese_names}"
 
-    def test_ticker_display_html_includes_code_and_name(self):
-        """_ticker_display_html 返回格式含 code 和中文名。"""
-        from astock_quant.predict.renderer import _ticker_display_html
-        result = _ticker_display_html("600519")
-        assert "600519" in result, "ticker display 缺 code"
-        assert "贵州茅台" in result, "ticker display 缺中文名"
-
 
 # ---------------------------------------------------------------------------
-# 命门 4：每个 § 末尾有 📖 大白话 字串
+# 命门 4：_render_plain_language 大白话翻译
+#
+# 注：2026-05-22 移除报告旧涨跌预测章节后，渲染后的报告不再含 4 个旧模型的
+# 📖 大白话段。_render_plain_language 函数本身保留并仍有单测，下面直接测函数。
 # ---------------------------------------------------------------------------
 
 class TestPlainLanguageSectionAtEnd:
-
-    def test_html_contains_plain_language_for_direction(self, tmp_path):
-        """direction 节含 📖 大白话 内容。"""
-        html = _render_html(_make_full_results(), tmp_path)
-        assert "📖" in html, "HTML 缺少 📖 大白话内容"
-        assert "plain-language" in html or "📖" in html, \
-            "direction 节缺少大白话段"
 
     def test_render_plain_language_direction_not_empty(self):
         """_render_plain_language('direction', ...) 返回非空含 📖 字串。"""
@@ -327,55 +326,66 @@ class TestGetTickerNameFallbackChain:
 
 
 # ---------------------------------------------------------------------------
-# 命门 7：今日总结含 Top 1 推荐股票
+# 命门 7：今日速览围绕价值选股名单（不再读旧涨跌预测模型）
+#
+# 注：2026-05-22 移除旧涨跌预测章节后，今日速览改为讲「本期综合分第一的价值股」，
+# 不再讲「ranking top1」「① 强势评分」。
 # ---------------------------------------------------------------------------
+
+def _make_value_picks_for_summary() -> list[dict]:
+    return [
+        {"ticker": "601838", "composite_score": 0.799, "pe": 6.0, "pb": 0.9,
+         "roe": 15.2, "reason": "估值低、ROE 高"},
+        {"ticker": "600519", "composite_score": 0.72, "pe": 26.0, "pb": 8.0,
+         "roe": 28.0, "reason": "盈利质量强"},
+    ]
+
 
 class TestTodaySummaryIncludesTopRecommendation:
 
-    def test_summary_line_2_contains_top1_stock(self, tmp_path):
-        """今日总结第 2 行（🥇）含 ranking top1 股票名或代码。"""
-        rank_preds = [
-            _make_pred("601012", 1.0, score=0.92),  # 隆基绿能，score 最高
-            _make_pred("300750", 1.0, score=0.78),
-        ]
-        results = _make_full_results(rank_preds=rank_preds)
+    def test_summary_line_1_contains_top_value_pick(self, tmp_path):
+        """今日速览第 1 行含本期综合分第一的价值股代码。"""
+        results = _make_full_results()
+        results["value_picks"] = _make_value_picks_for_summary()
         html = _render_html(results, tmp_path)
-        # 第 2 行应含 🥇 + 隆基绿能 / 601012
-        assert "🥇" in html, "今日总结缺少 🥇 符号"
-        assert "601012" in html or "隆基绿能" in html, \
-            "今日总结第 2 行未包含 ranking top1 股票（601012 / 隆基绿能）"
+        assert "🎯" in html, "今日速览缺少 🎯 符号"
+        assert "601838" in html, "今日速览未包含本期综合分第一的票 601838"
 
-    def test_render_today_summary_line2_has_top1(self):
-        """_render_today_summary → summary_line_2 含 top1 股票。"""
+    def test_render_today_summary_line1_has_top_value_pick(self):
+        """_render_today_summary → summary_line_1 含综合分最高的价值股。"""
         from astock_quant.predict.renderer import _render_today_summary
-        rank_preds = [
-            _make_pred("600519", 1.0, score=0.95),
-            _make_pred("000858", 1.0, score=0.70),
-        ]
-        results = {
-            "direction": {"predictions": [_make_pred("600519", 1.0)], "metrics": {}},
-            "ranking": {"predictions": rank_preds, "metrics": {}},
-        }
+        results = {"value_picks": _make_value_picks_for_summary(), "backtest": {}}
         summary = _render_today_summary(results)
-        line2 = summary["summary_line_2"]
-        assert "🥇" in line2, f"summary_line_2 缺 🥇: {line2!r}"
-        assert "600519" in line2 or "贵州茅台" in line2, \
-            f"summary_line_2 未含 top1 股票 600519/贵州茅台: {line2!r}"
+        line1 = summary["summary_line_1"]
+        assert "🎯" in line1, f"summary_line_1 缺 🎯: {line1!r}"
+        assert "601838" in line1 or "成都银行" in line1, \
+            f"summary_line_1 未含综合分第一的票 601838/成都银行: {line1!r}"
 
-    def test_render_today_summary_no_ranking_preds_graceful(self):
-        """ranking 无数据时 _render_today_summary 不崩溃，给出占位文本。"""
+    def test_render_today_summary_no_old_prediction_traces(self):
+        """命门：今日速览不再出现旧涨跌预测痕迹（强势评分 / AUC / ranking）。"""
         from astock_quant.predict.renderer import _render_today_summary
-        results = {
-            "direction": {"predictions": [], "metrics": {}},
-            "ranking": {"predictions": [], "metrics": {}},
-        }
+        results = {"value_picks": _make_value_picks_for_summary(), "backtest": {}}
         summary = _render_today_summary(results)
-        assert "summary_line_2" in summary
-        assert isinstance(summary["summary_line_2"], str)
+        joined = " ".join(summary.values())
+        assert "强势评分" not in joined, f"今日速览残留「强势评分」: {joined!r}"
+        assert "AUC" not in joined, f"今日速览残留「AUC」: {joined!r}"
+
+    def test_render_today_summary_no_value_picks_graceful(self):
+        """value_picks 无数据时 _render_today_summary 不崩溃，给出占位文本。"""
+        from astock_quant.predict.renderer import _render_today_summary
+        results = {"value_picks": [], "backtest": {}}
+        summary = _render_today_summary(results)
+        for key in ("summary_line_1", "summary_line_2", "summary_line_3"):
+            assert key in summary
+            assert isinstance(summary[key], str)
 
 
 # ---------------------------------------------------------------------------
-# 命门 8：HTML 信号条图含 CSS 颜色（红/绿）
+# 命门 8：_render_signal_distribution 信号条图
+#
+# 注：2026-05-22 移除报告旧涨跌预测章节后，渲染后的报告不再含买卖信号区，
+# 也就没有 signal-bar CSS。_render_signal_distribution 函数本身保留并仍有单测，
+# 下面直接测函数输出，不再断言整份报告里的 signal-bar。
 # ---------------------------------------------------------------------------
 
 class TestSignalDistributionHtmlUsesColors:
@@ -396,15 +406,6 @@ class TestSignalDistributionHtmlUsesColors:
         preds = [_make_pred("600519", 0.0)]
         html = _render_signal_distribution(preds, style="html")
         assert "sell" in html, "信号分布 HTML 缺少 sell 类"
-
-    def test_html_template_signal_bar_css_has_color(self, tmp_path):
-        """渲染后的完整 HTML 含 signal-bar 的 CSS 颜色定义（#52c41a / #f5222d）。"""
-        html = _render_html(_make_full_results(), tmp_path)
-        # CSS 定义在 <style> 里，应含绿色和红色
-        assert "#52c41a" in html or "signal-bar" in html, \
-            "渲染后 HTML 缺少 signal-bar 绿色色值 #52c41a"
-        assert "#f5222d" in html or "signal-bar" in html, \
-            "渲染后 HTML 缺少 signal-bar 红色色值 #f5222d"
 
     def test_signal_distribution_md_not_html_style(self):
         """MD 模式返回 ASCII 条图，不是 HTML div。"""

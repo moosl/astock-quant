@@ -546,17 +546,16 @@ class TestRenderer:
                 "请检查 daily_report.md.template 是否还有 诚信声明 / AUC 等关键词。"
             )
 
-    def test_disclaimer_is_not_empty_placeholder(self, tmp_path):
-        """诚信声明区域不能是空占位符（如空 div 或空 blockquote）。"""
+    def test_template_placeholders_all_substituted(self, tmp_path):
+        """渲染后 HTML 里不应残留任何 $xxx 模板占位符（全部已替换）。"""
+        import re
         from astock_quant.predict.renderer import render
-        # 传入真实 AUC 值，验证渲染后值出现在报告里
         results = _make_full_results()
-        results["direction"]["metrics"]["auc"] = 0.5131
+        results["value_picks"] = _make_value_picks()
         html_path, _ = render(results, tmp_path)
         content = html_path.read_text(encoding="utf-8")
-        # 渲染后 $direction_auc 占位符应被替换
-        assert "$direction_auc" not in content, \
-            "HTML 里 $direction_auc 占位符未被渲染替换"
+        leftover = re.findall(r"\$[a-z_]+", content)
+        assert not leftover, f"HTML 里残留未替换的模板占位符: {leftover}"
 
     def test_render_empty_predictions_does_not_crash(self, tmp_path):
         """各 target 的 predictions 为空时 render 不崩溃（错误场景下的降级）。"""
@@ -931,40 +930,65 @@ class TestBacktestRenderer:
 
 
 class TestNewReportStructure:
+    """价值选股报告结构 —— 2026-05-22 用户决策后旧涨跌预测章节已整段移除。
 
-    def test_html_has_value_section_before_experimental(self, tmp_path):
-        """HTML 中价值选股 §1 出现在实验性预测 §5 之前。"""
+    报告结构（HTML/MD 一致）：今日速览 → 诚信声明 → §1 价值名单 → §2 回测
+    → §3 历史准确率 → §4 元数据。
+    """
+
+    def test_html_value_section_is_section_1(self, tmp_path):
+        """HTML 里价值选股是 §1，排在回测 §2 之前。"""
         from astock_quant.predict.renderer import render
         results = _make_full_results()
         results["value_picks"] = _make_value_picks()
         html_path, _ = render(results, tmp_path)
         content = html_path.read_text(encoding="utf-8")
-        idx_value = content.find("§1")
-        idx_exp = content.find("§5")
-        assert idx_value != -1, "HTML 缺少 §1"
-        assert idx_exp != -1, "HTML 缺少 §5"
-        assert idx_value < idx_exp, "价值选股 §1 应在实验性预测 §5 之前"
+        idx_value = content.find("§1 本季度价值选股推荐名单")
+        idx_backtest = content.find("§2 策略回测")
+        assert idx_value != -1, "HTML 缺少 §1 价值选股名单"
+        assert idx_backtest != -1, "HTML 缺少 §2 回测"
+        assert idx_value < idx_backtest, "价值选股 §1 应在回测 §2 之前"
 
-    def test_md_has_value_section_before_experimental(self, tmp_path):
-        """MD 中价值选股 §1 出现在实验性预测 §5 之前。"""
+    def test_md_value_section_is_section_1(self, tmp_path):
+        """MD 里价值选股是 §1，排在回测 §2 之前。"""
         from astock_quant.predict.renderer import render
         results = _make_full_results()
         results["value_picks"] = _make_value_picks()
         _, md_path = render(results, tmp_path)
         content = md_path.read_text(encoding="utf-8")
-        idx_value = content.find("§1")
-        idx_exp = content.find("§5")
-        assert idx_value != -1, "MD 缺少 §1"
-        assert idx_exp != -1, "MD 缺少 §5"
-        assert idx_value < idx_exp, "价值选股 §1 应在实验性预测 §5 之前"
+        idx_value = content.find("§1 本季度价值选股推荐名单")
+        idx_backtest = content.find("§2 策略回测")
+        assert idx_value != -1, "MD 缺少 §1 价值选股名单"
+        assert idx_backtest != -1, "MD 缺少 §2 回测"
+        assert idx_value < idx_backtest, "价值选股 §1 应在回测 §2 之前"
 
-    def test_experimental_section_labeled_in_html(self, tmp_path):
-        """短期预测区域有「实验性」标注。"""
+    def test_old_prediction_sections_removed(self, tmp_path):
+        """命门：旧涨跌预测痕迹彻底清除 —— 不再有「实验性预测」「明日强势评分」等章节。"""
         from astock_quant.predict.renderer import render
         results = _make_full_results()
-        html_path, _ = render(results, tmp_path)
-        content = html_path.read_text(encoding="utf-8")
-        assert "实验性" in content or "接近随机" in content
+        results["value_picks"] = _make_value_picks()
+        html_path, md_path = render(results, tmp_path)
+        for content, name in [
+            (html_path.read_text(encoding="utf-8"), "HTML"),
+            (md_path.read_text(encoding="utf-8"), "MD"),
+        ]:
+            assert "短期实验性预测" not in content, f"{name} 仍残留「短期实验性预测」章节"
+            assert "接近随机基线" not in content, f"{name} 仍残留旧预测降级说明"
+            assert "DirectionModel" not in content, f"{name} 仍残留旧模型名 DirectionModel"
+
+    def test_sections_numbered_consecutively(self, tmp_path):
+        """章节编号 §1-§4 连续无跳号（HTML 与 MD 一致）。"""
+        from astock_quant.predict.renderer import render
+        results = _make_full_results()
+        results["value_picks"] = _make_value_picks()
+        html_path, md_path = render(results, tmp_path)
+        for content, name in [
+            (html_path.read_text(encoding="utf-8"), "HTML"),
+            (md_path.read_text(encoding="utf-8"), "MD"),
+        ]:
+            for sec in ("§1", "§2", "§3", "§4"):
+                assert sec in content, f"{name} 缺少章节 {sec}"
+            assert "§5" not in content, f"{name} 不应再有 §5（旧预测章节已删）"
 
     def test_disclaimer_still_present_with_new_structure(self, tmp_path):
         """命门：诚信声明在新报告结构里仍存在（不构成投资建议）。"""
@@ -977,7 +1001,6 @@ class TestNewReportStructure:
             has_disclaimer = (
                 "诚信声明" in content
                 or "不构成投资" in content
-                or "AUC" in content
             )
             assert has_disclaimer, f"命门失败：{name} 新结构里缺少诚信声明"
 

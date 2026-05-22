@@ -1,4 +1,10 @@
-"""每日预测报告渲染器 —— Stage 4 P12/P13."""
+"""每日价值选股报告渲染器.
+
+报告结构（HTML / MD 一致）：今日速览 → 诚信声明 → §1 价值选股推荐名单
+→ §2 策略回测 → §3 历史准确率 → §4 运行元数据。
+旧的 4 个短期涨跌预测模型（direction/return/ranking/trade_signal）已不在报告里
+单独成章；direction / ranking 的结果仅用于「今日速览」三行速读文字。
+"""
 
 from __future__ import annotations
 
@@ -97,77 +103,57 @@ def _translate_metric(metric_name: str, value: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Confidence verdict helper
-# ---------------------------------------------------------------------------
-
-def _conf_verdict(avg_conf: float) -> str:
-    if avg_conf < 0.3:
-        return "几乎没把握"
-    if avg_conf < 0.5:
-        return "把握很弱"
-    if avg_conf < 0.7:
-        return "把握一般"
-    return "把握较强（仍不构成投资建议）"
-
-
-# ---------------------------------------------------------------------------
 # Today summary (§0)
 # ---------------------------------------------------------------------------
 
 def _render_today_summary(results: dict[str, Any]) -> dict[str, str]:
-    """Generate 3-line today summary.
+    """Generate the 3-line 今日速览 for the value-stock report.
+
+    三行均围绕「价值选股」：line1 本期综合分第一的票，line2 名单规模，
+    line3 诚信结论（回测跑赢≠实盘赚钱）。数据取自 results 的 value_picks /
+    backtest —— 不再读旧的 4 个短期涨跌预测模型。
 
     Returns dict with keys: summary_line_1, summary_line_2, summary_line_3.
     """
-    dir_d = results.get("direction", {})
-    rank_d = results.get("ranking", {})
+    value_picks = results.get("value_picks") or []
+    backtest = results.get("backtest") or {}
 
-    # P25：① 改为「明日强势评分」—— 看 score 排名分布，不再涨/跌二分类
-    dir_preds = dir_d.get("predictions", [])
-    dir_auc = dir_d.get("metrics", {}).get("auc", 0.0)
-    if dir_preds:
-        scores = [getattr(p, "score", 0.5) for p in dir_preds]
-        import statistics
-        conf_std = statistics.stdev(scores) if len(scores) > 1 else 0.0
-        ranked = sorted(dir_preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
-        top = ranked[0]
-        top_name = get_ticker_name(getattr(top, "ticker", ""))
-        top_score = getattr(top, "score", 0.0)
-        n_strong = sum(1 for s in scores if s >= 0.5)
-    else:
-        conf_std = 0.0
-        top_name = "?"
-        top_score = 0.0
-        n_strong = 0
-
-    # line1：① 强势评分速读
-    if conf_std < 0.02 and dir_preds:
-        # 兜底 —— 万一模型又退化（数据源异常等），如实告警
+    # line1：本期综合分最高的价值股
+    if value_picks:
+        top = value_picks[0]
+        top_code = str(top.get("ticker", "?"))
+        top_name = get_ticker_name(top_code)
+        top_score = top.get("composite_score", top.get("score"))
+        try:
+            score_str = f"（综合分 {float(top_score):.3f}）" if top_score is not None else ""
+        except (TypeError, ValueError):
+            score_str = ""
         line1 = (
-            "⚠️ [① 强势评分异常] 今天所有票评分接近相同"
-            "（std={:.4f}），可能数据源出问题，① 结果今日不可信。".format(conf_std)
+            f"🎯 今日一句话：本期综合分最高的是 {top_name}（{top_code}）{score_str}"
+            f"—— 综合分看的是「又便宜又能赚钱」，不是预测明天涨跌。"
         )
     else:
-        line1 = (
-            f"🎯 今日一句话：① 强势评分最高的是 {top_name}"
-            f"（明日走强概率 {top_score:.2f}），全场 {n_strong} 只评分 ≥ 0.5。"
+        line1 = "🎯 今日一句话：本期暂无价值选股名单（数据未就绪）。"
+
+    # line2：名单规模 + 持有方式
+    if value_picks:
+        line2 = (
+            f"🥇 本期推荐名单共 {len(value_picks)} 只，按综合分降序排列；"
+            f"策略设计是每季度调一次仓、长期持有。"
         )
-
-    # line2：top1 from ranking
-    rank_preds = rank_d.get("predictions", [])
-    if rank_preds:
-        top1 = max(rank_preds, key=lambda p: getattr(p, "score", 0))
-        top1_code = getattr(top1, "ticker", "?")
-        top1_name = get_ticker_name(top1_code)
-        top1_conf = getattr(top1, "score", 0.0)
-        line2 = f"🥇 如果非要选 1 只：{top1_name}（{top1_code}），但模型自己说 {top1_conf:.2f} 的把握。"
     else:
-        line2 = "🥇 如果非要选 1 只：暂无排名数据。"
+        line2 = "🥇 本期推荐名单暂不可用。"
 
-    # line3：诚信结论
+    # line3：诚信结论 —— 口径与首页 / docs 说明一致
+    excess = backtest.get("excess_return")
+    try:
+        excess_str = f"（回测年化超额约 {float(excess) * 100:.1f}%，但样本小、偏乐观）" if excess is not None else ""
+    except (TypeError, ValueError):
+        excess_str = ""
     line3 = (
-        f"⚠️ 诚信结论：① 强势评分 AUC≈{dir_auc:.2f}（有区分力但偏弱、且预测的是较少见的"
-        f"大涨事件）；② ③ ④ 信号也弱。全部仅供学习研究，**不构成投资建议**。"
+        f"⚠️ 诚信结论：这套价值选股策略在历史回测里有跑赢沪深300的迹象"
+        f"{excess_str}，但「回测跑赢」不等于「实盘能赚钱」。"
+        f"全部仅供学习研究，**不构成投资建议**。"
     )
     return {"summary_line_1": line1, "summary_line_2": line2, "summary_line_3": line3}
 
@@ -316,245 +302,6 @@ def _render_plain_language(section: str, section_data: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Status helpers
-# ---------------------------------------------------------------------------
-
-def _status_cls(ok: bool | None) -> str:
-    if ok is None:
-        return "warn"
-    return "ok" if ok else "err"
-
-
-def _status_icon(ok: bool | None) -> str:
-    if ok is None:
-        return "⚠️"
-    return "✅" if ok else "❌"
-
-
-# ---------------------------------------------------------------------------
-# Section formatters — HTML (with ticker names + signal distribution + plain lang)
-# ---------------------------------------------------------------------------
-
-def _ticker_display_html(ticker: str) -> str:
-    name = get_ticker_name(ticker)
-    if name != ticker:
-        return f"{ticker} <small>{name}</small>"
-    return ticker
-
-
-def _fmt_direction_html(d: dict[str, Any]) -> str:
-    # P25：① 改为「明日强势评分」—— 按 score 降序排名展示（不再涨/跌二分类）
-    preds = d.get("predictions", [])
-    total = len(preds)
-    ranked = sorted(preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
-
-    rows = ""
-    for i, p in enumerate(ranked[:20], 1):
-        ticker = getattr(p, "ticker", "")
-        score = getattr(p, "score", 0.0)
-        rows += (
-            f"<tr><td>#{i}</td>"
-            f"<td>{_ticker_display_html(ticker)}</td>"
-            f"<td>{score:.3f}</td></tr>\n"
-        )
-    if total > 20:
-        rows += (
-            f"<tr><td colspan='3' style='color:#aaa'>"
-            f"… 共 {total} 只，仅显示评分最高 20</td></tr>\n"
-        )
-
-    plain = _render_plain_language("direction", d)
-    return f"""<div class="card">
-<p class="meta">覆盖 {total} 只 · 模型给每只票打「明日走强概率」分（0~1，越高 = 越可能明日涨 &gt;3%）</p>
-</div>
-<div class="card">
-<table>
-<thead><tr><th>排名</th><th>股票</th><th>强势评分</th></tr></thead>
-<tbody>{rows}</tbody>
-</table>
-</div>
-<div class="plain-language"><span class="emoji">📖</span><span class="text">{plain}</span></div>"""
-
-
-def _fmt_return_html(d: dict[str, Any]) -> str:
-    preds = d.get("predictions", [])
-    total = len(preds)
-    rows = ""
-    for p in sorted(preds, key=lambda x: getattr(x, "value", 0), reverse=True)[:20]:
-        ticker = getattr(p, "ticker", "")
-        ret = getattr(p, "value", 0.0)
-        tag = "tag-buy" if ret > 0 else "tag-sell"
-        rows += (
-            f"<tr><td>{_ticker_display_html(ticker)}</td>"
-            f"<td><span class='{tag}'>{ret:+.2%}</span></td></tr>\n"
-        )
-    if total > 20:
-        rows += f"<tr><td colspan='2' style='color:#aaa'>… 共 {total} 只，仅显示前 20</td></tr>\n"
-
-    plain = _render_plain_language("return", d)
-    return f"""<div class="card">
-<table>
-<thead><tr><th>股票</th><th>预期收益率</th></tr></thead>
-<tbody>{rows}</tbody>
-</table>
-</div>
-<div class="plain-language"><span class="emoji">📖</span><span class="text">{plain}</span></div>"""
-
-
-def _fmt_ranking_html(d: dict[str, Any]) -> str:
-    preds = d.get("predictions", [])
-    total = len(preds)
-    sorted_preds = sorted(preds, key=lambda x: getattr(x, "score", 0), reverse=True)
-    rows = ""
-    for rank, p in enumerate(sorted_preds[:20], 1):
-        ticker = getattr(p, "ticker", "")
-        score = getattr(p, "score", 0.0)
-        rows += f"<tr><td>#{rank}</td><td>{_ticker_display_html(ticker)}</td><td>{score:.4f}</td></tr>\n"
-    if total > 20:
-        rows += f"<tr><td colspan='3' style='color:#aaa'>… 共 {total} 只，仅显示前 20</td></tr>\n"
-
-    plain = _render_plain_language("ranking", d)
-    return f"""<div class="card">
-<table>
-<thead><tr><th>排名</th><th>股票</th><th>ranking score</th></tr></thead>
-<tbody>{rows}</tbody>
-</table>
-</div>
-<div class="plain-language"><span class="emoji">📖</span><span class="text">{plain}</span></div>"""
-
-
-def _fmt_signal_html(d: dict[str, Any]) -> str:
-    preds = d.get("predictions", [])
-    buy = d.get("buy_predictions", [])
-    n_tp = sum(1 for p in preds if getattr(p, "value", None) == 1.0)
-    n_sl = sum(1 for p in preds if getattr(p, "value", None) == -1.0)
-    n_hold = sum(1 for p in preds if getattr(p, "value", None) == 0.0)
-
-    signal_dist = _render_signal_distribution(preds, style="html")
-    rows = ""
-    for p in buy[:20]:
-        ticker = getattr(p, "ticker", "")
-        score = getattr(p, "score", 0.0)
-        tp = getattr(p, "tp_price", None)
-        sl = getattr(p, "sl_price", None)
-        tp_str = f"{tp:.2f}" if tp is not None else "-"
-        sl_str = f"{sl:.2f}" if sl is not None else "-"
-        rows += (
-            f"<tr><td>{_ticker_display_html(ticker)}</td>"
-            f"<td><span class='tag-tp'>TP</span></td>"
-            f"<td>{score:.3f}</td>"
-            f"<td>{tp_str}</td><td>{sl_str}</td></tr>\n"
-        )
-
-    plain = _render_plain_language("trade_signal", d)
-    return f"""<div class="card">
-{signal_dist}
-<p class="meta" style="margin-top:8px">TP {n_tp} | HOLD {n_hold} | SL {n_sl} | 入场候选 {len(buy)}</p>
-</div>
-<div class="card">
-<table>
-<thead><tr><th>股票</th><th>信号</th><th>置信度</th><th>止盈价</th><th>止损价</th></tr></thead>
-<tbody>{rows if rows else "<tr><td colspan='5' style='color:#aaa'>无 TP 信号</td></tr>"}</tbody>
-</table>
-</div>
-<div class="plain-language"><span class="emoji">📖</span><span class="text">{plain}</span></div>"""
-
-
-# ---------------------------------------------------------------------------
-# Section formatters — Markdown (with ticker names + signal distribution + plain lang)
-# ---------------------------------------------------------------------------
-
-def _ticker_display_md(ticker: str) -> str:
-    name = get_ticker_name(ticker)
-    if name != ticker:
-        return f"{ticker} {name}"
-    return ticker
-
-
-def _fmt_direction_md(d: dict[str, Any]) -> str:
-    # P25：① 改为「明日强势评分」—— 按 score 降序排名展示（不再涨/跌二分类）
-    preds = d.get("predictions", [])
-    total = len(preds)
-    ranked = sorted(preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
-
-    lines = [
-        f"覆盖 {total} 只 · 模型给每只票打「明日走强概率」分（0~1，越高 = 越可能明日涨 >3%）",
-        "",
-        "| 排名 | 股票 | 强势评分 |",
-        "|-----|-----|---------|",
-    ]
-    for i, p in enumerate(ranked[:20], 1):
-        ticker = getattr(p, "ticker", "")
-        score = getattr(p, "score", 0.0)
-        lines.append(f"| #{i} | {_ticker_display_md(ticker)} | {score:.3f} |")
-    if total > 20:
-        lines.append(f"| … | 共 {total} 只，仅显示评分最高 20 | |")
-    plain = _render_plain_language("direction", d)
-    lines += ["", f"> {plain}"]
-    return "\n".join(lines)
-
-
-def _fmt_return_md(d: dict[str, Any]) -> str:
-    preds = d.get("predictions", [])
-    total = len(preds)
-    lines = [f"覆盖 {total} 只（按预期收益率降序）", "", "| 股票 | 预期收益率 |", "|-----|-----------|"]
-    for p in sorted(preds, key=lambda x: getattr(x, "value", 0), reverse=True)[:20]:
-        ticker = getattr(p, "ticker", "")
-        ret = getattr(p, "value", 0.0)
-        lines.append(f"| {_ticker_display_md(ticker)} | {ret:+.2%} |")
-    if total > 20:
-        lines.append(f"| … | 共 {total} 只，仅显示前 20 |")
-    plain = _render_plain_language("return", d)
-    lines += ["", f"> {plain}"]
-    return "\n".join(lines)
-
-
-def _fmt_ranking_md(d: dict[str, Any]) -> str:
-    preds = d.get("predictions", [])
-    total = len(preds)
-    sorted_preds = sorted(preds, key=lambda x: getattr(x, "score", 0), reverse=True)
-    lines = [f"共 {total} 只（按 ranking score 降序）", "", "| 排名 | 股票 | ranking score |", "|-----|-----|---------------|"]
-    for rank, p in enumerate(sorted_preds[:20], 1):
-        ticker = getattr(p, "ticker", "")
-        score = getattr(p, "score", 0.0)
-        lines.append(f"| #{rank} | {_ticker_display_md(ticker)} | {score:.4f} |")
-    if total > 20:
-        lines.append(f"| … | 共 {total} 只，仅显示前 20 | |")
-    plain = _render_plain_language("ranking", d)
-    lines += ["", f"> {plain}"]
-    return "\n".join(lines)
-
-
-def _fmt_signal_md(d: dict[str, Any]) -> str:
-    preds = d.get("predictions", [])
-    buy = d.get("buy_predictions", [])
-    n_tp = sum(1 for p in preds if getattr(p, "value", None) == 1.0)
-    n_sl = sum(1 for p in preds if getattr(p, "value", None) == -1.0)
-    n_hold = sum(1 for p in preds if getattr(p, "value", None) == 0.0)
-
-    dist = _render_signal_distribution(preds, style="md")
-    lines = [
-        f"TP {n_tp} | HOLD {n_hold} | SL {n_sl} | 入场候选 {len(buy)}",
-        "", "```", dist, "```", "",
-        "| 股票 | 信号 | 置信度 | 止盈价 | 止损价 |",
-        "|-----|------|--------|--------|--------|",
-    ]
-    for p in buy[:20]:
-        ticker = getattr(p, "ticker", "")
-        score = getattr(p, "score", 0.0)
-        tp = getattr(p, "tp_price", None)
-        sl = getattr(p, "sl_price", None)
-        tp_str = f"{tp:.2f}" if tp is not None else "-"
-        sl_str = f"{sl:.2f}" if sl is not None else "-"
-        lines.append(f"| {_ticker_display_md(ticker)} | TP | {score:.3f} | {tp_str} | {sl_str} |")
-    if not buy:
-        lines.append("| (无 TP 信号) | | | | |")
-    plain = _render_plain_language("trade_signal", d)
-    lines += ["", f"> {plain}"]
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
 # Value picks section — quarterly recommended buy list
 # ---------------------------------------------------------------------------
 
@@ -662,6 +409,15 @@ def _fmt_value_picks_md(value_picks: list[dict[str, Any]] | None) -> str:
 # Backtest performance section — strategy vs HS300
 # ---------------------------------------------------------------------------
 
+# 第二行回测 caveat —— 固定补充，与首页 / docs 说明的诚实口径保持一致。
+# artifact 的 disclaimers[0] 只覆盖「单一市场环境」一点，这里把「样本小 / 幸存者偏差 /
+# 超额靠 2024 单年 / IR 偏低 / 回测跑赢≠实盘赚钱」也明说，避免报告口径比网站单薄。
+_BACKTEST_CAVEAT_2 = (
+    "这段回测还偏乐观：样本小、选股池有幸存者偏差、超额收益主要靠 2024 年单独一年、"
+    "信息比率 IR 偏低（说明这点超额并不稳）。「回测跑赢」不等于「未来实盘能赚钱」。"
+)
+
+
 def _fmt_backtest_html(backtest: dict[str, Any] | None) -> str:
     """Render backtest performance vs HS300 as HTML."""
     if not backtest:
@@ -710,6 +466,7 @@ def _fmt_backtest_html(backtest: dict[str, Any] | None) -> str:
 <tbody>{rows}</tbody>
 </table>
 <p class="meta" style="margin-top:8px;color:#d4380d">⚠️ {caveat}</p>
+<p class="meta" style="margin-top:6px;color:#d4380d">⚠️ {_BACKTEST_CAVEAT_2}</p>
 </div>"""
 
 
@@ -755,6 +512,8 @@ def _fmt_backtest_md(backtest: dict[str, Any] | None) -> str:
         f"| 换仓次数 | {n_quarters if n_quarters is not None else '-'} 季度 |",
         "",
         f"> ⚠️ {caveat}",
+        "",
+        f"> ⚠️ {_BACKTEST_CAVEAT_2}",
     ]
     return "\n".join(lines)
 
