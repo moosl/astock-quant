@@ -2,8 +2,7 @@
 
 报告结构（HTML / MD 一致）：今日速览 → 诚信声明 → §1 价值选股推荐名单
 → §2 策略回测 → §3 历史准确率 → §4 运行元数据。
-旧的 4 个短期涨跌预测模型（direction/return/ranking/trade_signal）已不在报告里
-单独成章；direction / ranking 的结果仅用于「今日速览」三行速读文字。
+今日速览三行均围绕价值选股名单与回测；不含短期涨跌预测内容。
 """
 
 from __future__ import annotations
@@ -13,93 +12,9 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
-from astock_quant.predict.ticker_names import get_ticker_name, get_ticker_short_name
+from astock_quant.predict.ticker_names import get_ticker_name
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-
-
-# ---------------------------------------------------------------------------
-# ASCII bar helper (kept for backward compat / non-signal uses)
-# ---------------------------------------------------------------------------
-
-def make_ascii_bar(values: dict[str, float] | list[float], max_width: int = 40) -> str:
-    """Return a plain-text bar chart using █░ characters."""
-    if isinstance(values, list):
-        items: list[tuple[str, float]] = [(str(i), v) for i, v in enumerate(values)]
-    else:
-        items = list(values.items())
-
-    if not items:
-        return "(empty)"
-
-    max_val = max(abs(v) for _, v in items) or 1.0
-    max_lbl = max(len(k) for k, _ in items)
-
-    lines = []
-    for label, val in items:
-        bar_len = int(abs(val) / max_val * max_width)
-        bar = "█" * bar_len + "░" * (max_width - bar_len)
-        lines.append(f"{label:<{max_lbl}} │{bar}│ {val:+.4f}")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Metric translation helpers
-# ---------------------------------------------------------------------------
-
-def _translate_metric(metric_name: str, value: Any) -> str:
-    """Dynamically translate a metric value to plain-language verdict."""
-    if not isinstance(value, (int, float)):
-        return "数据不足"
-    v = float(value)
-
-    if metric_name == "auc":
-        # P25：① 改为「明日强势评分」（预测明日涨 >3%）。这是不平衡任务，
-        # AUC 天然偏高 —— 高 AUC ≠ 能盈利，措辞须诚实不夸大。
-        if v < 0.5:
-            return "📖 比抛硬币还差，模型在帮倒忙"
-        if v < 0.55:
-            return "📖 跟猜硬币差不多（基线 0.5）"
-        if v < 0.65:
-            return "📖 有一点区分力，但很弱，仅供参考"
-        if v < 0.80:
-            return (
-                "📖 有真实区分力（能挑出较可能走强的票），但预测的是少见的大涨、"
-                "AUC 偏乐观，不代表能稳定盈利"
-            )
-        return "📖 异常高，请检查是否数据泄漏（look-ahead）"
-
-    if metric_name == "r2":
-        if v < 0:
-            return "📖 比「直接猜均值」还差一点点"
-        if v < 0.01:
-            return "📖 接近「直接猜均值」水平"
-        if v < 0.03:
-            return "📖 略好于「直接猜均值」，但解释力很弱"
-        if v < 0.10:
-            return "📖 有一定预测力，业界算合格"
-        return "📖 解释力强，请检查是否数据泄漏（look-ahead）"
-
-    if metric_name in ("rank_ic", "spearman_corr"):
-        abs_v = abs(v)
-        if abs_v < 0.02:
-            return "📖 给 30 只票排名跟抓阄差不多"
-        if abs_v < 0.05:
-            return "📖 排名能力很弱，统计意义不显著"
-        if abs_v < 0.10:
-            return "📖 排名有一定信号，量化业界算合格"
-        return "📖 排名信号较强，请检查是否数据泄漏"
-
-    if metric_name in ("accuracy", "macro_f1", "signal_f1"):
-        if v < 0.33:
-            return "📖 比「买/卖/不动」三选一瞎猜还差"
-        if v < 0.38:
-            return "📖 跟从「买/卖/不动」三选一瞎猜一样"
-        if v < 0.45:
-            return "📖 略好于三选一瞎猜"
-        return "📖 真有点信号，但仍需多次验证"
-
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -156,149 +71,6 @@ def _render_today_summary(results: dict[str, Any]) -> dict[str, str]:
         f"全部仅供学习研究，不构成投资建议。"
     )
     return {"summary_line_1": line1, "summary_line_2": line2, "summary_line_3": line3}
-
-
-# ---------------------------------------------------------------------------
-# Signal distribution renderer
-# ---------------------------------------------------------------------------
-
-def _render_signal_distribution(predictions: list, style: str = "md") -> str:
-    """Render signal distribution. style='md' → ASCII; style='html' → CSS bars."""
-    n_buy = sum(1 for p in predictions if getattr(p, "value", None) == 1.0)
-    n_sell = sum(1 for p in predictions if getattr(p, "value", None) == 0.0)
-    n_hold = len(predictions) - n_buy - n_sell
-    total = len(predictions) or 1
-
-    if style == "html":
-        buy_pct = n_buy / total * 100
-        sell_pct = n_sell / total * 100
-        hold_pct = n_hold / total * 100
-        return (
-            '<div class="signal-distribution">'
-            f'<div class="signal-bar buy" style="width:{buy_pct:.0f}%;min-width:60px"><span>↑ 看涨 {n_buy} 只</span></div>'
-            f'<div class="signal-bar sell" style="width:{sell_pct:.0f}%;min-width:60px"><span>↓ 看跌 {n_sell} 只</span></div>'
-            f'<div class="signal-bar hold" style="width:{hold_pct:.0f}%;min-width:60px"><span>→ 中性 {n_hold} 只</span></div>'
-            "</div>"
-        )
-
-    # ASCII mode for markdown
-    scores = [abs(getattr(p, "score", 0.5) - 0.5) * 2 for p in predictions]
-    n_no = sum(1 for s in scores if s < 0.3)
-    n_weak = sum(1 for s in scores if 0.3 <= s < 0.5)
-    n_mid = sum(1 for s in scores if 0.5 <= s < 0.7)
-    n_strong = sum(1 for s in scores if s >= 0.7)
-
-    def bar(n: int) -> str:
-        return "█" * max(1, int(n / total * 15)) if n else ""
-
-    lines = [
-        "当前涨跌分布：",
-        f"  ↑ 看涨 {n_buy} 只",
-        f"  ↓ 看跌 {n_sell} 只",
-        f"  → 中性 {n_hold} 只",
-        "",
-        f"模型把握度分布（共 {total} 只）：",
-        f"  没把握（<0.3）      {bar(n_no):<15} {n_no} 只 ({n_no/total*100:.0f}%)",
-        f"  把握很弱（0.3~0.5） {bar(n_weak):<15} {n_weak} 只 ({n_weak/total*100:.0f}%)",
-        f"  把握一般（0.5~0.7） {bar(n_mid):<15} {n_mid} 只 ({n_mid/total*100:.0f}%)",
-        f"  把握较强（>0.7）    {bar(n_strong):<15} {n_strong} 只 ({n_strong/total*100:.0f}%)",
-    ]
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Plain language section summaries
-# ---------------------------------------------------------------------------
-
-def _render_plain_language(section: str, section_data: dict[str, Any]) -> str:
-    """Generate 📖 plain-language summary for a section."""
-    preds = section_data.get("predictions", [])
-    metrics = section_data.get("metrics", {})
-
-    if section == "direction":
-        # P25：① 改为「明日强势评分」—— 解读 score 排名，不再涨/跌二分类
-        if not preds:
-            return "📖 明日强势评分无数据。"
-        ranked = sorted(preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
-        top = ranked[0]
-        top_name = get_ticker_name(getattr(top, "ticker", ""))
-        top_score = getattr(top, "score", 0.0)
-        auc = metrics.get("auc", 0.0)
-        n_strong = sum(1 for p in preds if getattr(p, "score", 0.0) >= 0.5)
-        return (
-            f"📖 模型今天评分最高的是 {top_name}（{top_score:.2f}），"
-            f"全场 {n_strong} 只评分 ≥ 0.5。评分 = 模型估计的「明日涨 >3%」概率，"
-            f"AUC={auc:.2f}（有区分力但偏弱，且预测的是较少见的大涨事件）。"
-            f"高分 ≠ 稳赚，不构成投资建议。"
-        )
-
-    if section == "return":
-        if not preds:
-            return "📖 收益率预测无数据。"
-        vals = [abs(getattr(p, "value", 0.0)) for p in preds]
-        max_abs = max(vals) if vals else 0.0
-        r2 = metrics.get("r2", 0.0)
-        if max_abs < 0.005:
-            return (
-                "📖 模型预测所有票涨跌幅都在 ±0.5% 之内，绝对值接近 0 —— 等于**偷懒猜均值**。"
-                f"这就是 R²={r2:.4f} 的体现：模型没本事预测幅度。"
-            )
-        if max_abs < 0.02:
-            return (
-                f"📖 模型预测涨跌幅最大 {max_abs:.2%}，但 IC 接近 0 意味着**幅度方向都不准**。看个热闹就行。"
-            )
-        sorted_by_val = sorted(preds, key=lambda p: getattr(p, "value", 0), reverse=True)
-        top_p = sorted_by_val[0]
-        bot_p = sorted_by_val[-1]
-        top_name = get_ticker_name(getattr(top_p, "ticker", ""))
-        bot_name = get_ticker_name(getattr(bot_p, "ticker", ""))
-        top_val = getattr(top_p, "value", 0.0)
-        bot_val = getattr(bot_p, "value", 0.0)
-        return (
-            f"📖 模型预测最大涨幅 {top_val:+.2%}（{top_name}）、最大跌幅 {bot_val:+.2%}（{bot_name}）。"
-            f"但模型 R²={r2:.4f}，**幅度准确性不可信**。"
-        )
-
-    if section == "ranking":
-        ic = abs(metrics.get("spearman_corr", 0.0) or 0.0)
-        sorted_preds = sorted(preds, key=lambda p: getattr(p, "score", 0), reverse=True)
-        top5_shorts = " / ".join(
-            get_ticker_short_name(getattr(p, "ticker", "")) for p in sorted_preds[:5]
-        ) or "（无数据）"
-        if ic < 0.02:
-            return f"📖 前 5 名（{top5_shorts}）按 ranking score 排，但 rank-IC≈{ic:.3f} **相当于抓阄**，不要当真。"
-        if ic < 0.05:
-            return f"📖 前 5 名（{top5_shorts}）有弱相关性（rank-IC≈{ic:.3f}），统计意义不显著。"
-        return f"📖 前 5 名（{top5_shorts}）相关性较强（rank-IC≈{ic:.3f}），但仍需多次验证后才能信。"
-
-    if section == "trade_signal":
-        n_tp = sum(1 for p in preds if getattr(p, "value", None) == 1.0)
-        n_sl = sum(1 for p in preds if getattr(p, "value", None) == -1.0)
-        n_hold = sum(1 for p in preds if getattr(p, "value", None) == 0.0)
-        # P25b：用真实 macro-F1，不再写死「33%」假数字（三选一瞎猜基线才是 0.33）
-        macro_f1 = metrics.get("macro_f1", 0.0)
-        buy_preds = section_data.get("buy_predictions", [])
-        if n_tp == 0 and n_sl == 0:
-            return (
-                f"📖 今天 buy 信号 0 / sell 信号 0 / hold {n_hold}，"
-                f"**模型不让你买任何东西**也不让卖任何东西——这是 Stage 4 设计的保守默认行为。"
-            )
-        if n_tp > 0:
-            top_buy_names = "、".join(
-                get_ticker_name(getattr(p, "ticker", "")) for p in buy_preds[:3]
-            )
-            top_conf = max((getattr(p, "score", 0.0) for p in buy_preds), default=0.0)
-            return (
-                f"📖 今天 buy 信号 {n_tp}：{top_buy_names}，置信度 {top_conf:.2f}。"
-                f"模型 macro-F1≈{macro_f1:.2f}（三选一瞎猜基线≈0.33），信号偏弱，不构成投资建议。"
-            )
-        if n_sl > 0:
-            return (
-                f"📖 今天 sell 信号 {n_sl}，hold {n_hold}。"
-                f"模型 macro-F1≈{macro_f1:.2f}（三选一瞎猜基线≈0.33），信号偏弱，不构成投资建议。"
-            )
-
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -559,8 +331,6 @@ def render(results: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
         results: dict returned by daily.py with keys:
             report_date, universe_size, generated_at, data_cutoff,
             total_seconds, json_path, errors,
-            direction / ranking (optional): 仅用来生成「今日速览」三行速读文字；
-                这 4 个短期模型本身已不在报告里单独展示。
             accuracy (optional): 历史准确率表数据，None 时显示占位。
             value_picks (optional): list of dicts with keys ticker, composite_score,
                 pe_percentile, pb_percentile, roe, reason
@@ -583,7 +353,7 @@ def render(results: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
     errors = results.get("errors", [])
     errors_summary = "无" if not errors else "; ".join(str(e) for e in errors)
 
-    # 今日速览三行 —— 仍读 direction / ranking 数据生成速读文字
+    # 今日速览三行 —— 取 value_picks / backtest 数据生成速读文字
     today = _render_today_summary(results)
 
     subs: dict[str, str] = {

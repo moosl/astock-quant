@@ -1,14 +1,15 @@
-"""P12 用户友好报告改造命门测试.
+"""用户友好报告命门测试 —— renderer.py 价值选股版.
 
-覆盖 8 个命门：
-1. 今日总结 div 在诚信声明 div 之前（HTML 顺序）
-2. 诚信声明每个 metric 后真有 "→ 📖" 字串（动态翻译）
-3. 表格 ticker 列含中文名
-4. 每个 § 末尾有 📖 大白话 字串
-5. _translate_metric 对不同数值返回不同文本（动态评级）
-6. get_ticker_name 3 道 fallback：已知 → 全名 / 未知 → ticker 自身
-7. 今日总结含 Top 1 推荐股票
-8. HTML 信号条图含 CSS 颜色（red/green 关键词或色值）
+覆盖：
+- 今日总结 div 在诚信声明 div 之前（HTML 顺序）
+- 今日总结含本期综合分第一的价值股
+- §1 价值名单表格 ticker 列含中文名
+- get_ticker_name 3 道 fallback：已知 → 全名 / 未知 → ticker 自身
+
+注：2026-05-22 项目「涨跌预测 → 价值选股」改造后，旧的 4 个短期模型
+（direction/return/ranking/trade_signal）服务函数 make_ascii_bar /
+_translate_metric / _render_signal_distribution / _render_plain_language
+已从 renderer.py 删除，对应单测一并移除。
 """
 
 from __future__ import annotations
@@ -16,58 +17,25 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
-
-from astock_quant.contracts import Prediction
-
 
 # ---------------------------------------------------------------------------
 # shared helpers
 # ---------------------------------------------------------------------------
 
-def _make_pred(ticker: str = "600519", value: float = 1.0, score: float = 0.62) -> Prediction:
-    return Prediction(
-        ticker=ticker,
-        date=pd.Timestamp("2026-05-16").date(),
-        target_type="direction",
-        value=value,
-        score=score,
-        proba=(0.38, 0.62),
-    )
-
-
-def _make_full_results(
-    dir_preds=None,
-    rank_preds=None,
-    dir_metrics=None,
-) -> dict:
-    """renderer.render 期望的完整 results dict."""
-    if dir_preds is None:
-        dir_preds = [_make_pred("600519", 1.0), _make_pred("000858", 0.0)]
-    if rank_preds is None:
-        rank_preds = [_make_pred("601012", 1.0, score=0.92), _make_pred("300750", 1.0, score=0.78)]
-    if dir_metrics is None:
-        dir_metrics = {"auc": 0.5131}
-
+def _make_full_results() -> dict:
+    """renderer.render 期望的 results dict（价值选股版）."""
     return {
         "report_date": "2026-05-16",
-        "universe_size": len(dir_preds),
+        "universe_size": 2,
         "generated_at": "2026-05-16T16:32:00",
         "data_cutoff": "2026-05-16",
         "total_seconds": 1.23,
         "model_version": "2026-05-16",
-        "model_paths": "direction=artifacts/models/direction_2026-05-16.lgb",
         "json_path": "artifacts/daily_reports/predictions_2026-05-16.json",
         "errors": [],
-        "direction": {"predictions": dir_preds, "metrics": dir_metrics},
-        "return_": {"predictions": dir_preds, "metrics": {"r2": -0.002}},
-        "ranking": {"predictions": rank_preds, "metrics": {"spearman_corr": 0.01}},
-        "trade_signal": {
-            "predictions": [_make_pred("600519", 1.0), _make_pred("000001", -1.0)],
-            "buy_predictions": [_make_pred("600519", 1.0)],
-            "metrics": {"macro_f1": 0.33},
-        },
         "accuracy": None,
+        "value_picks": None,
+        "backtest": None,
     }
 
 
@@ -116,37 +84,7 @@ class TestHtmlTodaySummaryBeforeDisclaimer:
 
 
 # ---------------------------------------------------------------------------
-# 命门 2：_translate_metric 动态翻译指标
-#
-# 注：2026-05-22 用户决策移除报告里的旧涨跌预测章节后，诚信声明里的「实验性指标表」
-# 也一并删了，渲染后的报告不再出现「→ 📖」箭头。_translate_metric 函数本身保留
-# （仍有单测覆盖），下面这几个 test 直接测函数，不再断言渲染产物。
-# ---------------------------------------------------------------------------
-
-class TestDisclaimerMetricTranslationArrow:
-
-    def test_translate_metric_auc_produces_translation(self):
-        """_translate_metric('auc', 0.5131) 返回含 📖 的翻译字符串。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("auc", 0.5131)
-        assert "📖" in result, f"_translate_metric(auc, 0.5131) 未返回 📖 翻译: {result!r}"
-        assert len(result) > 5, "翻译太短，疑似空或错误"
-
-    def test_translate_metric_r2_produces_translation(self):
-        """_translate_metric('r2', -0.002) 返回含 📖 的翻译。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("r2", -0.002)
-        assert "📖" in result, f"_translate_metric(r2, -0.002) 未返回 📖 翻译: {result!r}"
-
-    def test_translate_metric_spearman_produces_translation(self):
-        """_translate_metric('spearman_corr', 0.01) 返回含 📖 的翻译。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("spearman_corr", 0.01)
-        assert "📖" in result
-
-
-# ---------------------------------------------------------------------------
-# 命门 3：表格 ticker 列含中文名
+# 命门 2：表格 ticker 列含中文名
 # ---------------------------------------------------------------------------
 
 def _results_with_value_picks() -> dict:
@@ -183,93 +121,7 @@ class TestTickerTableContainsChineseName:
 
 
 # ---------------------------------------------------------------------------
-# 命门 4：_render_plain_language 大白话翻译
-#
-# 注：2026-05-22 移除报告旧涨跌预测章节后，渲染后的报告不再含 4 个旧模型的
-# 📖 大白话段。_render_plain_language 函数本身保留并仍有单测，下面直接测函数。
-# ---------------------------------------------------------------------------
-
-class TestPlainLanguageSectionAtEnd:
-
-    def test_render_plain_language_direction_not_empty(self):
-        """_render_plain_language('direction', ...) 返回非空含 📖 字串。"""
-        from astock_quant.predict.renderer import _render_plain_language
-        preds = [_make_pred("600519", 0.0), _make_pred("000858", 0.0)]
-        result = _render_plain_language("direction", {"predictions": preds, "metrics": {}})
-        assert "📖" in result, f"_render_plain_language direction 未返回 📖: {result!r}"
-
-    def test_render_plain_language_return_not_empty(self):
-        """_render_plain_language('return', ...) 返回非空含 📖 字串。"""
-        from astock_quant.predict.renderer import _render_plain_language
-        preds = [_make_pred("600519", 0.001)]
-        result = _render_plain_language("return", {"predictions": preds, "metrics": {"r2": -0.002}})
-        assert "📖" in result
-
-    def test_render_plain_language_ranking_not_empty(self):
-        """_render_plain_language('ranking', ...) 返回非空含 📖 字串。"""
-        from astock_quant.predict.renderer import _render_plain_language
-        preds = [_make_pred("601012", 1.0, score=0.92)]
-        result = _render_plain_language("ranking", {"predictions": preds, "metrics": {}})
-        assert "📖" in result
-
-    def test_render_plain_language_trade_signal_not_empty(self):
-        """_render_plain_language('trade_signal', ...) 返回非空含 📖 字串。"""
-        from astock_quant.predict.renderer import _render_plain_language
-        preds = [_make_pred("600519", 1.0)]
-        result = _render_plain_language("trade_signal", {"predictions": preds, "metrics": {}})
-        assert "📖" in result
-
-
-# ---------------------------------------------------------------------------
-# 命门 5：_translate_metric 对不同数值返回不同文本（动态评级）
-# ---------------------------------------------------------------------------
-
-class TestTranslateMetricDynamicRating:
-
-    def test_auc_low_vs_high_returns_different_text(self):
-        """AUC=0.51 和 AUC=0.70 应返回不同的翻译文案。"""
-        from astock_quant.predict.renderer import _translate_metric
-        low = _translate_metric("auc", 0.51)
-        high = _translate_metric("auc", 0.70)
-        assert low != high, \
-            f"AUC=0.51 和 AUC=0.70 翻译相同，动态评级未生效: {low!r}"
-
-    def test_auc_weak_signal_not_strong(self):
-        """AUC=0.51 不应翻译成「真有点信号」等强评价。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("auc", 0.51)
-        assert "硬币" in result or "随机" in result or "猜" in result, \
-            f"AUC=0.51 应被翻译成随机水平，实际: {result!r}"
-
-    def test_auc_high_triggers_look_ahead_warning(self):
-        """AUC=0.80 应触发「检查是否数据泄漏」警告。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("auc", 0.80)
-        assert "泄漏" in result or "look-ahead" in result or "异常" in result, \
-            f"AUC=0.80 应警告数据泄漏，实际: {result!r}"
-
-    def test_r2_negative_vs_positive_returns_different_text(self):
-        """R²=-0.002 和 R²=0.05 应返回不同翻译。"""
-        from astock_quant.predict.renderer import _translate_metric
-        neg = _translate_metric("r2", -0.002)
-        pos = _translate_metric("r2", 0.05)
-        assert neg != pos
-
-    def test_translate_metric_non_numeric_returns_fallback(self):
-        """_translate_metric 传入非数字 → 返回「数据不足」而非崩溃。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("auc", None)
-        assert result == "数据不足", f"非数字输入应返回「数据不足」，实际: {result!r}"
-
-    def test_translate_metric_unknown_metric_returns_empty(self):
-        """未知 metric_name → 返回空字符串（不崩溃）。"""
-        from astock_quant.predict.renderer import _translate_metric
-        result = _translate_metric("unknown_metric_xyz", 0.5)
-        assert isinstance(result, str)
-
-
-# ---------------------------------------------------------------------------
-# 命门 6：get_ticker_name fallback 链
+# 命门 3：get_ticker_name fallback 链
 # ---------------------------------------------------------------------------
 
 class TestGetTickerNameFallbackChain:
@@ -326,7 +178,7 @@ class TestGetTickerNameFallbackChain:
 
 
 # ---------------------------------------------------------------------------
-# 命门 7：今日速览围绕价值选股名单（不再读旧涨跌预测模型）
+# 命门 4：今日速览围绕价值选股名单（不再读旧涨跌预测模型）
 #
 # 注：2026-05-22 移除旧涨跌预测章节后，今日速览改为讲「本期综合分第一的价值股」，
 # 不再讲「ranking top1」「① 强势评分」。
@@ -378,39 +230,3 @@ class TestTodaySummaryIncludesTopRecommendation:
         for key in ("summary_line_1", "summary_line_2", "summary_line_3"):
             assert key in summary
             assert isinstance(summary[key], str)
-
-
-# ---------------------------------------------------------------------------
-# 命门 8：_render_signal_distribution 信号条图
-#
-# 注：2026-05-22 移除报告旧涨跌预测章节后，渲染后的报告不再含买卖信号区，
-# 也就没有 signal-bar CSS。_render_signal_distribution 函数本身保留并仍有单测，
-# 下面直接测函数输出，不再断言整份报告里的 signal-bar。
-# ---------------------------------------------------------------------------
-
-class TestSignalDistributionHtmlUsesColors:
-
-    def test_signal_distribution_html_contains_green_color(self):
-        """HTML style 的 signal-bar.buy 含绿色色值（#52c41a 或 green 关键词）。"""
-        from astock_quant.predict.renderer import _render_signal_distribution
-        preds = [_make_pred("600519", 1.0), _make_pred("000858", 0.0)]
-        html = _render_signal_distribution(preds, style="html")
-        assert "buy" in html, "信号分布 HTML 缺少 buy 类"
-        # 颜色通过 CSS class 注入，html 片段里应有 class="signal-bar buy"
-        assert 'class="signal-bar buy"' in html or "signal-bar buy" in html, \
-            f"信号分布 HTML 缺少 signal-bar buy class: {html[:300]}"
-
-    def test_signal_distribution_html_contains_red_color(self):
-        """HTML signal-bar.sell 含红色 CSS class。"""
-        from astock_quant.predict.renderer import _render_signal_distribution
-        preds = [_make_pred("600519", 0.0)]
-        html = _render_signal_distribution(preds, style="html")
-        assert "sell" in html, "信号分布 HTML 缺少 sell 类"
-
-    def test_signal_distribution_md_not_html_style(self):
-        """MD 模式返回 ASCII 条图，不是 HTML div。"""
-        from astock_quant.predict.renderer import _render_signal_distribution
-        preds = [_make_pred("600519", 1.0), _make_pred("000858", 0.0)]
-        md = _render_signal_distribution(preds, style="md")
-        assert "<div" not in md, "MD 模式不应含 HTML div"
-        assert "看涨" in md or "看跌" in md, "MD 模式应含涨跌描述文字"
