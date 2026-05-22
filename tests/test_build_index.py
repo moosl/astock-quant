@@ -102,8 +102,9 @@ def test_index_no_backtest_artifact(fake_project):
     index = (fake_project / "docs" / "index.html").read_text(encoding="utf-8")
     assert "2026-05-22" in index
     assert "价值选股" in index
-    # 回测卡片靠 backtest-strip class 渲染，缺数据时整块不出现
-    assert "backtest-strip" not in index
+    # 回测卡片缺数据时整块不渲染 —— 查 div（class 名在 <style> 里始终存在，不能用它判断）
+    assert '<div class="backtest-strip">' not in index
+    assert "策略累计收益" not in index
 
 
 def test_index_empty_reports(fake_project):

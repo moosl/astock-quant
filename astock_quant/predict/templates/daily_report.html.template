@@ -198,7 +198,7 @@
   </div>
 
   <!-- ===== §3 运行状态 ===== -->
-  <h2>§4 运行状态</h2>
+  <h2>§3 运行状态</h2>
   <div class="summary-grid">
     <div class="summary-card $direction_status_cls">
       <div class="big">$direction_status_icon</div>
@@ -222,8 +222,8 @@
     <p class="meta">数据截至：$data_cutoff &nbsp;|&nbsp; 模型文件：$model_paths</p>
   </div>
 
-  <!-- ===== §5 短期实验性预测（降级，已知接近随机）===== -->
-  <h2>§5 短期实验性预测（已知接近随机，仅供参考）</h2>
+  <!-- ===== §4 短期实验性预测（降级，已知接近随机）===== -->
+  <h2>§4 短期实验性预测（已知接近随机，仅供参考）</h2>
   <div class="experimental-notice">
     ⚠️ 以下 4 个短期预测模型经验证接近随机基线，不具备 alpha，降级到报告末尾展示，仅供学习研究参考。
   </div>
@@ -248,14 +248,14 @@
     $signal_section
   </div>
 
-  <!-- ===== §6 历史准确率（P14 落盘后可用）===== -->
-  <h2>§6 历史准确率</h2>
+  <!-- ===== §5 历史准确率（P14 落盘后可用）===== -->
+  <h2>§5 历史准确率</h2>
   <div class="card">
     $accuracy_section
   </div>
 
-  <!-- ===== §7 运行元数据 ===== -->
-  <h2>§7 运行元数据</h2>
+  <!-- ===== §6 运行元数据 ===== -->
+  <h2>§6 运行元数据</h2>
   <div class="card">
     <table>
       <tr><td><strong>报告生成时间</strong></td><td>$generated_at</td></tr>
