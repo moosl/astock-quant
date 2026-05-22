@@ -130,7 +130,7 @@
     <div class="metrics">
       <div>
         <div class="metric-val">AUC = $direction_auc</div>
-        <div class="metric-lbl">涨跌方向（随机猜 AUC=0.5）</div>
+        <div class="metric-lbl">明日强势评分（随机猜 AUC=0.5）</div>
         <div class="metric-translation">$auc_translation</div>
       </div>
       <div>
@@ -162,7 +162,7 @@
   <div class="summary-grid">
     <div class="summary-card $direction_status_cls">
       <div class="big">$direction_status_icon</div>
-      <div class="lbl">① 涨跌方向</div>
+      <div class="lbl">① 明日强势评分</div>
     </div>
     <div class="summary-card $return_status_cls">
       <div class="big">$return_status_icon</div>
@@ -182,8 +182,8 @@
     <p class="meta">数据截至：$data_cutoff &nbsp;|&nbsp; 模型文件：$model_paths</p>
   </div>
 
-  <!-- ===== §2 ① 涨跌方向 ===== -->
-  <h2>§2 ① 涨跌方向（DirectionModel）</h2>
+  <!-- ===== §2 ① 明日强势评分 ===== -->
+  <h2>§2 ① 明日强势评分（DirectionModel）</h2>
   $direction_section
 
   <!-- ===== §3 ② 预期收益 ===== -->

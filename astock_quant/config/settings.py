@@ -173,15 +173,19 @@ class SplitConfig:
 
 @dataclass(frozen=True)
 class LabelConfig:
-    """标签参数 —— P3 labels/targets.py 用。P2 阶段占位.
+    """标签参数 —— P3 labels/targets.py 用.
 
-    horizon：预测未来多少个交易日。
-    direction_threshold：① 涨跌方向二分类的收益阈值 ——
-        未来 horizon 日收益 > 阈值记为 1（涨），否则 0。
+    horizon：②收益 ③排名 ④买卖信号 的预测窗口（未来 N 个交易日）。
+    direction_horizon：① 专属预测窗口。P25 网格实验（20 组配置）证明「未来 5 日
+        涨跌」用散户因子不可预测（模型必退化）；改为预测「明日是否明显走强」，
+        模型才有真实区分力（300 只实测 79 棵树 / AUC 0.74）。
+    direction_threshold：① 的收益阈值 —— 未来 direction_horizon 日收益 > 阈值记为 1。
+        P25：0.0（单纯涨跌，实测退化）→ 0.03（明日涨幅 >3% = 明显走强）。
     """
 
-    horizon: int = 5  # 预测未来 N 个交易日
-    direction_threshold: float = 0.0  # 二分类阈值（0 = 单纯涨跌；可调成 0.02 过滤噪音）
+    horizon: int = 5  # ②③④ 预测未来 N 个交易日
+    direction_horizon: int = 1  # ① 专属：预测明日（P25 改，原与 horizon 共用 5）
+    direction_threshold: float = 0.03  # ① 阈值：明日涨幅 >3% 记为「走强」（P25 改，原 0.0）
 
 
 @dataclass(frozen=True)

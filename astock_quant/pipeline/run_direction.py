@@ -112,7 +112,8 @@ def run_direction(
         - factor_names:     模型训练时的因子列名
     """
     t_total = time.time()
-    horizon = horizon if horizon is not None else SETTINGS.label.horizon
+    # P25：① 用专属 direction_horizon（明日），不与 ②③④ 的 horizon（5 日）共用
+    horizon = horizon if horizon is not None else SETTINGS.label.direction_horizon
     threshold = threshold if threshold is not None else SETTINGS.label.direction_threshold
     purge_gap_days = (
         purge_gap_days if purge_gap_days is not None else SETTINGS.split.purge_gap

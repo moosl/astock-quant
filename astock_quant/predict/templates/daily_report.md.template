@@ -20,7 +20,7 @@ $summary_line_3
 
 | 模型 | 指标 | 数值 | 📖 翻译 |
 |---|---|---:|---|
-| ① 涨跌方向 | AUC | $direction_auc | $auc_translation |
+| ① 明日强势评分 | AUC | $direction_auc | $auc_translation |
 | ② 收益率预测 | R² | $return_r2 | $r2_translation |
 | ③ 横截面排名 | rank-IC | $ranking_ic | $ic_translation |
 | ④ 买卖信号 | macro-F1 | $signal_f1 | $f1_translation |
@@ -33,7 +33,7 @@ $summary_line_3
 
 | 模型 | 状态 | 说明 |
 |------|------|------|
-| ① 涨跌方向（DirectionModel）| $direction_status_icon | $direction_status_note |
+| ① 明日强势评分（DirectionModel）| $direction_status_icon | $direction_status_note |
 | ② 预期收益（ReturnRegressor）| $return_status_icon | $return_status_note |
 | ③ 横截面排名（RankingModel）| $ranking_status_icon | $ranking_status_note |
 | ④ 买卖信号（TradeSignalModel）| $signal_status_icon | $signal_status_note |
@@ -42,7 +42,7 @@ $summary_line_3
 
 ---
 
-## §2 ① 涨跌方向（DirectionModel）
+## §2 ① 明日强势评分（DirectionModel）
 
 $direction_section
 

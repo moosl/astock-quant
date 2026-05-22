@@ -48,16 +48,19 @@ def _translate_metric(metric_name: str, value: Any) -> str:
     v = float(value)
 
     if metric_name == "auc":
+        # P25：① 改为「明日强势评分」（预测明日涨 >3%）。这是不平衡任务，
+        # AUC 天然偏高 —— 高 AUC ≠ 能盈利，措辞须诚实不夸大。
         if v < 0.5:
             return "📖 比抛硬币还差，模型在帮倒忙"
-        if v < 0.52:
-            return "📖 跟猜硬币差不多（基线 0.5 = 抛硬币）"
         if v < 0.55:
-            return "📖 略好于随机猜，但不够稳定"
-        if v < 0.58:
-            return "📖 接近学术界蓝筹股预测理论上限"
+            return "📖 跟猜硬币差不多（基线 0.5）"
         if v < 0.65:
-            return "📖 真有点信号，但仍需多次验证"
+            return "📖 有一点区分力，但很弱，仅供参考"
+        if v < 0.80:
+            return (
+                "📖 有真实区分力（能挑出较可能走强的票），但预测的是少见的大涨、"
+                "AUC 偏乐观，不代表能稳定盈利"
+            )
         return "📖 异常高，请检查是否数据泄漏（look-ahead）"
 
     if metric_name == "r2":
@@ -119,40 +122,38 @@ def _render_today_summary(results: dict[str, Any]) -> dict[str, str]:
     dir_d = results.get("direction", {})
     rank_d = results.get("ranking", {})
 
+    # P25：① 改为「明日强势评分」—— 看 score 排名分布，不再涨/跌二分类
     dir_preds = dir_d.get("predictions", [])
-    n_buy = sum(1 for p in dir_preds if getattr(p, "value", None) == 1.0)
-    n_sell = sum(1 for p in dir_preds if getattr(p, "value", None) == 0.0)
-    n_hold = len(dir_preds) - n_buy - n_sell
-
-    # avg_conf = mean of |score - 0.5| * 2
+    dir_auc = dir_d.get("metrics", {}).get("auc", 0.0)
     if dir_preds:
         scores = [getattr(p, "score", 0.5) for p in dir_preds]
-        avg_conf = sum(abs(s - 0.5) * 2 for s in scores) / len(scores)
         import statistics
         conf_std = statistics.stdev(scores) if len(scores) > 1 else 0.0
+        ranked = sorted(dir_preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
+        top = ranked[0]
+        top_name = get_ticker_name(getattr(top, "ticker", ""))
+        top_score = getattr(top, "score", 0.0)
+        n_strong = sum(1 for s in scores if s >= 0.5)
     else:
-        avg_conf = 0.0
         conf_std = 0.0
+        top_name = "?"
+        top_score = 0.0
+        n_strong = 0
 
-    verdict = _conf_verdict(avg_conf)
-
-    # ① 涨跌方向退化检测：所有票预测分接近相同（std < 0.02）
-    # P24：经 20 组标签网格实验证实 —— 用散户可得的量价 + 财务因子预测 A股
-    # 个股短期涨跌方向不可行。退化是预期内的诚实结果，用户决定保留作教学示例。
+    # line1：① 强势评分速读
     if conf_std < 0.02 and dir_preds:
+        # 兜底 —— 万一模型又退化（数据源异常等），如实告警
         line1 = (
-            "📕 [教学示例 · ① 涨跌方向] 本模型经网格实验（20 组标签配置）证实："
-            "用散户可得的量价 + 财务因子，预测 A股 个股短期涨跌方向【做不到】。"
-            "下方预测分接近相同（score std={:.4f}）、方向一边倒，是『短期方向不可"
-            "预测』这一市场规律的真实体现 —— 保留作教学示例，请勿据此操作。".format(conf_std)
+            "⚠️ [① 强势评分异常] 今天所有票评分接近相同"
+            "（std={:.4f}），可能数据源出问题，① 结果今日不可信。".format(conf_std)
         )
     else:
         line1 = (
-            f"🎯 今日一句话：模型今天看跌 {n_sell} 只 / 看涨 {n_buy} 只 / 中性 {n_hold} 只，"
-            f"平均把握 {avg_conf:.2f} —— {verdict}。"
+            f"🎯 今日一句话：① 强势评分最高的是 {top_name}"
+            f"（明日走强概率 {top_score:.2f}），全场 {n_strong} 只评分 ≥ 0.5。"
         )
 
-    # top1 from ranking
+    # line2：top1 from ranking
     rank_preds = rank_d.get("predictions", [])
     if rank_preds:
         top1 = max(rank_preds, key=lambda p: getattr(p, "score", 0))
@@ -163,19 +164,11 @@ def _render_today_summary(results: dict[str, Any]) -> dict[str, str]:
     else:
         line2 = "🥇 如果非要选 1 只：暂无排名数据。"
 
-    # honesty one-liner
-    if n_buy == 0 and n_sell == 0:
-        honesty = "模型对所有票都没强信号，今天什么都别做就是最佳策略。"
-    elif n_buy == 0 and avg_conf < 0.3:
-        honesty = "模型今天对所有票都看跌，但置信度非常低（< 0.3）—— 极可能是大盘整体震荡的体现，不要跟单。"
-    elif n_buy == 0 and avg_conf >= 0.5:
-        honesty = "模型对全部票都看跌且有一定把握，但单日信号统计意义弱，建议先看 P14 准确率追踪几周。"
-    elif n_buy > n_sell and avg_conf > 0.5:
-        honesty = "模型今天偏看涨且有一定把握，但请记住 AUC=0.5131（跟猜硬币差不多），不构成投资建议。"
-    else:
-        honesty = "模型信号方向不一，建议不要跟单，先看几周准确率追踪后再判断。"
-
-    line3 = f"⚠️ 诚信结论：{honesty}"
+    # line3：诚信结论
+    line3 = (
+        f"⚠️ 诚信结论：① 强势评分 AUC≈{dir_auc:.2f}（有区分力但偏弱、且预测的是较少见的"
+        f"大涨事件）；② ③ ④ 信号也弱。全部仅供学习研究，**不构成投资建议**。"
+    )
     return {"summary_line_1": line1, "summary_line_2": line2, "summary_line_3": line3}
 
 
@@ -237,28 +230,20 @@ def _render_plain_language(section: str, section_data: dict[str, Any]) -> str:
     metrics = section_data.get("metrics", {})
 
     if section == "direction":
-        n_buy = sum(1 for p in preds if getattr(p, "value", None) == 1.0)
-        n_sell = sum(1 for p in preds if getattr(p, "value", None) == 0.0)
-        n_total = len(preds) or 1
-        avg = sum(getattr(p, "score", 0.5) for p in preds) / n_total
-        if n_buy == 0 and n_sell == 0:
-            return (
-                f"📖 模型对 {n_total} 只股票全部「拿着不动」，预测分都在 0.45-0.55 中间犹豫不决"
-                f"（基线 0.5）。建议今天**什么都别买**。"
-            )
-        if n_buy == 0 and avg < 0.5:
-            return (
-                f"📖 模型今天对 {n_total} 只全部看跌，但预测分（avg {avg:.2f}）都低于但接近 0.5，"
-                f"说明**模型自己也没把握**。**不要跟单卖出**——很可能是大盘当天整体震荡的副作用。"
-            )
-        if n_buy > n_sell:
-            return (
-                f"📖 模型今天看涨 {n_buy} 只 / 看跌 {n_sell} 只，平均把握 {avg:.2f}。"
-                f"请记住 AUC=0.5131 跟猜硬币差不多，**这些看涨信号大概率是噪音**，不构成投资建议。"
-            )
+        # P25：① 改为「明日强势评分」—— 解读 score 排名，不再涨/跌二分类
+        if not preds:
+            return "📖 明日强势评分无数据。"
+        ranked = sorted(preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
+        top = ranked[0]
+        top_name = get_ticker_name(getattr(top, "ticker", ""))
+        top_score = getattr(top, "score", 0.0)
+        auc = metrics.get("auc", 0.0)
+        n_strong = sum(1 for p in preds if getattr(p, "score", 0.0) >= 0.5)
         return (
-            f"📖 模型今天看跌 {n_sell} 只 / 看涨 {n_buy} 只，平均把握 {avg:.2f}。"
-            f"同款提醒：不构成投资建议。"
+            f"📖 模型今天评分最高的是 {top_name}（{top_score:.2f}），"
+            f"全场 {n_strong} 只评分 ≥ 0.5。评分 = 模型估计的「明日涨 >3%」概率，"
+            f"AUC={auc:.2f}（有区分力但偏弱，且预测的是较少见的大涨事件）。"
+            f"高分 ≠ 稳赚，不构成投资建议。"
         )
 
     if section == "return":
@@ -356,34 +341,33 @@ def _ticker_display_html(ticker: str) -> str:
 
 
 def _fmt_direction_html(d: dict[str, Any]) -> str:
+    # P25：① 改为「明日强势评分」—— 按 score 降序排名展示（不再涨/跌二分类）
     preds = d.get("predictions", [])
-    up = sum(1 for p in preds if getattr(p, "value", None) == 1.0)
-    down = sum(1 for p in preds if getattr(p, "value", None) == 0.0)
     total = len(preds)
+    ranked = sorted(preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
 
-    signal_dist = _render_signal_distribution(preds, style="html")
     rows = ""
-    for p in preds[:20]:
+    for i, p in enumerate(ranked[:20], 1):
         ticker = getattr(p, "ticker", "")
-        prob = getattr(p, "score", 0.0)
-        direction = "涨" if getattr(p, "value", 0) == 1.0 else "跌"
-        tag_cls = "tag-buy" if direction == "涨" else "tag-sell"
+        score = getattr(p, "score", 0.0)
         rows += (
-            f"<tr><td>{_ticker_display_html(ticker)}</td>"
-            f"<td><span class='{tag_cls}'>{direction}</span></td>"
-            f"<td>{prob:.3f}</td></tr>\n"
+            f"<tr><td>#{i}</td>"
+            f"<td>{_ticker_display_html(ticker)}</td>"
+            f"<td>{score:.3f}</td></tr>\n"
         )
     if total > 20:
-        rows += f"<tr><td colspan='3' style='color:#aaa'>… 共 {total} 只，仅显示前 20</td></tr>\n"
+        rows += (
+            f"<tr><td colspan='3' style='color:#aaa'>"
+            f"… 共 {total} 只，仅显示评分最高 20</td></tr>\n"
+        )
 
     plain = _render_plain_language("direction", d)
     return f"""<div class="card">
-{signal_dist}
-<p class="meta" style="margin-top:8px">覆盖 {total} 只 | 看涨 {up} | 看跌 {down}</p>
+<p class="meta">覆盖 {total} 只 · 模型给每只票打「明日走强概率」分（0~1，越高 = 越可能明日涨 &gt;3%）</p>
 </div>
 <div class="card">
 <table>
-<thead><tr><th>股票</th><th>方向</th><th>置信度</th></tr></thead>
+<thead><tr><th>排名</th><th>股票</th><th>强势评分</th></tr></thead>
 <tbody>{rows}</tbody>
 </table>
 </div>
@@ -486,21 +470,23 @@ def _ticker_display_md(ticker: str) -> str:
 
 
 def _fmt_direction_md(d: dict[str, Any]) -> str:
+    # P25：① 改为「明日强势评分」—— 按 score 降序排名展示（不再涨/跌二分类）
     preds = d.get("predictions", [])
-    up = sum(1 for p in preds if getattr(p, "value", None) == 1.0)
-    down = sum(1 for p in preds if getattr(p, "value", None) == 0.0)
     total = len(preds)
+    ranked = sorted(preds, key=lambda p: getattr(p, "score", 0.0), reverse=True)
 
-    dist = _render_signal_distribution(preds, style="md")
-    lines = [f"覆盖 {total} 只 | 看涨 {up} | 看跌 {down}", "", "```", dist, "```", ""]
-    lines += ["| 股票 | 方向 | 置信度 |", "|-----|------|--------|"]
-    for p in preds[:20]:
+    lines = [
+        f"覆盖 {total} 只 · 模型给每只票打「明日走强概率」分（0~1，越高 = 越可能明日涨 >3%）",
+        "",
+        "| 排名 | 股票 | 强势评分 |",
+        "|-----|-----|---------|",
+    ]
+    for i, p in enumerate(ranked[:20], 1):
         ticker = getattr(p, "ticker", "")
-        prob = getattr(p, "score", 0.0)
-        direction = "涨↑" if getattr(p, "value", 0) == 1.0 else "跌↓"
-        lines.append(f"| {_ticker_display_md(ticker)} | {direction} | {prob:.3f} |")
+        score = getattr(p, "score", 0.0)
+        lines.append(f"| #{i} | {_ticker_display_md(ticker)} | {score:.3f} |")
     if total > 20:
-        lines.append(f"| … | 共 {total} 只，仅显示前 20 | |")
+        lines.append(f"| … | 共 {total} 只，仅显示评分最高 20 | |")
     plain = _render_plain_language("direction", d)
     lines += ["", f"> {plain}"]
     return "\n".join(lines)
@@ -694,7 +680,7 @@ def render(results: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
         "return_status_icon": _status_icon(ret_ok),
         "ranking_status_icon": _status_icon(rank_ok),
         "signal_status_icon": _status_icon(sig_ok),
-        "direction_status_note": _status_note(dir_d, "涨跌方向"),
+        "direction_status_note": _status_note(dir_d, "明日强势评分"),
         "return_status_note": _status_note(ret_d, "预期收益"),
         "ranking_status_note": _status_note(rank_d, "横截面排名"),
         "signal_status_note": _status_note(sig_d, "买卖信号"),
