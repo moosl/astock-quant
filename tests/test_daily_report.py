@@ -896,3 +896,96 @@ class TestNewReportStructure:
                 or "AUC" in content
             )
             assert has_disclaimer, f"命门失败：{name} 新结构里缺少诚信声明"
+
+
+# ---------------------------------------------------------------------------
+# 集成测试：_try_build_value_picks 用 compute_factor_frame 产出非空 picks
+# ---------------------------------------------------------------------------
+
+class TestTryBuildValuePicksIntegration:
+    """Guard that _try_build_value_picks produces real picks via compute_factor_frame.
+
+    Uses real factor/value_score modules but injects minimal synthetic data so the
+    test does not require network access or on-disk artifacts.
+    """
+
+    def _make_price_panel(self) -> pd.DataFrame:
+        """Build a MultiIndex=(date, ticker) price panel matching compute_factor_frame's expectation."""
+        import numpy as np
+        dates = pd.date_range("2026-01-01", periods=60, freq="B")
+        tickers = [f"60{i:04d}" for i in range(10)]
+        rng = np.random.default_rng(42)
+        frames = []
+        for t in tickers:
+            base = 10 + rng.random() * 90
+            prices = base + rng.random(len(dates)).cumsum() * 0.1
+            df = pd.DataFrame({
+                "close": prices,
+                "open": prices * 0.99,
+                "high": prices * 1.01,
+                "low": prices * 0.98,
+                "volume": rng.integers(1_000_000, 5_000_000, len(dates)).astype(float),
+                "pe": 8 + rng.random(len(dates)) * 20,
+                "pb": 0.5 + rng.random(len(dates)) * 3,
+                "dividend_yield": rng.random(len(dates)) * 0.05,
+            }, index=dates)
+            df.index.name = "date"
+            df["ticker"] = t
+            frames.append(df)
+        panel = pd.concat(frames).reset_index().set_index(["date", "ticker"]).sort_index()
+        return panel
+
+    def _make_financials(self, tickers: list) -> dict:
+        import numpy as np
+        from astock_quant.contracts import FinancialMetrics
+        rng = np.random.default_rng(42)
+        fin = {}
+        fin_dates = pd.date_range("2025-01-01", periods=4, freq="QE")
+        for t in tickers:
+            records = []
+            for d in fin_dates:
+                records.append(FinancialMetrics(
+                    ticker=t,
+                    report_period=d.strftime("%Y%m%d"),
+                    publish_date=d.strftime("%Y%m%d"),
+                    roe=0.05 + rng.random() * 0.25,
+                    gross_margin=0.1 + rng.random() * 0.5,
+                    net_margin=0.05 + rng.random() * 0.3,
+                ))
+            fin[t] = records
+        return fin
+
+    def test_try_build_value_picks_returns_nonempty_list(self):
+        """§1 核心命门：_try_build_value_picks 必须返回非空 list，不得返回 None。"""
+        from astock_quant.predict.daily import _try_build_value_picks
+
+        price_panel = self._make_price_panel()
+        tickers = price_panel.index.get_level_values("ticker").unique().tolist()
+        financials = self._make_financials(tickers)
+        prepared_data = {"prices": price_panel, "financials": financials, "moneyflow": None}
+
+        picks = _try_build_value_picks(
+            universe=tickers,
+            date_str="2026-02-28",
+            prepared_data=prepared_data,
+        )
+
+        assert picks is not None, "§1 命门：_try_build_value_picks 返回 None，报告会显示占位"
+        assert len(picks) > 0, "§1 命门：value_picks 列表为空，报告会显示空名单"
+        assert all("ticker" in p and "composite_score" in p for p in picks)
+
+    def test_try_build_value_picks_sorted_desc(self):
+        """picks 按 composite_score 降序排列。"""
+        from astock_quant.predict.daily import _try_build_value_picks
+
+        price_panel = self._make_price_panel()
+        tickers = price_panel.index.get_level_values("ticker").unique().tolist()
+        financials = self._make_financials(tickers)
+        prepared_data = {"prices": price_panel, "financials": financials, "moneyflow": None}
+
+        picks = _try_build_value_picks(
+            universe=tickers, date_str="2026-02-28", prepared_data=prepared_data
+        )
+        if picks and len(picks) > 1:
+            scores = [p["composite_score"] for p in picks]
+            assert scores == sorted(scores, reverse=True)

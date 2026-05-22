@@ -565,6 +565,19 @@ def _fmt_value_picks_html(value_picks: list[dict[str, Any]] | None) -> str:
             "<div class='card'><p class='meta'>价值选股数据尚未就绪"
             "（factor-engineer / strategy-engineer 完成后自动填充）。</p></div>"
         )
+    def _fmt_val(pct_val: Any, raw_val: Any, is_pct: bool) -> str:
+        """Show percentile (e.g. '12%') if available, else raw value, else '-'."""
+        import math
+        v = pct_val
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            v = raw_val
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            return "-"
+        try:
+            return f"{float(v):.0f}%" if is_pct else f"{float(v):.1f}"
+        except (TypeError, ValueError):
+            return "-"
+
     rows = ""
     for i, pick in enumerate(value_picks[:20], 1):
         ticker = pick.get("ticker", "")
@@ -572,12 +585,15 @@ def _fmt_value_picks_html(value_picks: list[dict[str, Any]] | None) -> str:
         score = pick.get("composite_score", pick.get("score", 0.0))
         pe_pct = pick.get("pe_percentile", None)
         pb_pct = pick.get("pb_percentile", None)
+        pe_raw = pick.get("pe", None)
+        pb_raw = pick.get("pb", None)
         roe = pick.get("roe", None)
         reason = pick.get("reason", "")
 
-        pe_str = f"{pe_pct:.0f}%" if pe_pct is not None else "-"
-        pb_str = f"{pb_pct:.0f}%" if pb_pct is not None else "-"
-        roe_str = f"{roe:.1f}%" if roe is not None else "-"
+        import math
+        pe_str = _fmt_val(pe_pct, pe_raw, is_pct=(pe_pct is not None and not (isinstance(pe_pct, float) and math.isnan(pe_pct))))
+        pb_str = _fmt_val(pb_pct, pb_raw, is_pct=(pb_pct is not None and not (isinstance(pb_pct, float) and math.isnan(pb_pct))))
+        roe_str = f"{float(roe):.1f}%" if roe is not None and not (isinstance(roe, float) and math.isnan(roe)) else "-"
         score_str = f"{score:.3f}" if isinstance(score, float) else str(score)
 
         rows += (
@@ -592,9 +608,9 @@ def _fmt_value_picks_html(value_picks: list[dict[str, Any]] | None) -> str:
             f"</tr>\n"
         )
     return f"""<div class="card">
-<p class="meta">综合分 = 便宜度（PE/PB 历史分位）+ 质量（ROE 等）加权，分位越低越便宜，ROE 越高越赚钱。</p>
+<p class="meta">综合分 = 便宜度（PE/PB）+ 质量（ROE 等）加权，PE/PB 越低越便宜，ROE 越高越赚钱。</p>
 <table>
-<thead><tr><th>排名</th><th>股票</th><th>综合分</th><th>PE 历史分位</th><th>PB 历史分位</th><th>ROE</th><th>入选理由</th></tr></thead>
+<thead><tr><th>排名</th><th>股票</th><th>综合分</th><th>PE</th><th>PB</th><th>ROE</th><th>入选理由</th></tr></thead>
 <tbody>{rows}</tbody>
 </table>
 </div>"""
@@ -605,23 +621,37 @@ def _fmt_value_picks_md(value_picks: list[dict[str, Any]] | None) -> str:
     if not value_picks:
         return "价值选股数据尚未就绪（factor-engineer / strategy-engineer 完成后自动填充）。"
     lines = [
-        "综合分 = 便宜度（PE/PB 历史分位）+ 质量（ROE 等）加权，分位越低越便宜，ROE 越高越赚钱。",
+        "综合分 = 便宜度（PE/PB）+ 质量（ROE 等）加权，PE/PB 越低越便宜，ROE 越高越赚钱。",
         "",
-        "| 排名 | 股票 | 综合分 | PE 历史分位 | PB 历史分位 | ROE | 入选理由 |",
+        "| 排名 | 股票 | 综合分 | PE | PB | ROE | 入选理由 |",
         "|-----|------|--------|------------|------------|-----|---------|",
     ]
     for i, pick in enumerate(value_picks[:20], 1):
+        import math
         ticker = pick.get("ticker", "")
         name = get_ticker_name(ticker)
         score = pick.get("composite_score", pick.get("score", 0.0))
         pe_pct = pick.get("pe_percentile", None)
         pb_pct = pick.get("pb_percentile", None)
+        pe_raw = pick.get("pe", None)
+        pb_raw = pick.get("pb", None)
         roe = pick.get("roe", None)
         reason = pick.get("reason", "")
 
-        pe_str = f"{pe_pct:.0f}%" if pe_pct is not None else "-"
-        pb_str = f"{pb_pct:.0f}%" if pb_pct is not None else "-"
-        roe_str = f"{roe:.1f}%" if roe is not None else "-"
+        def _nan_none(v: Any) -> Any:
+            return None if (isinstance(v, float) and math.isnan(v)) else v
+
+        pe_pct = _nan_none(pe_pct)
+        pb_pct = _nan_none(pb_pct)
+        pe_raw = _nan_none(pe_raw)
+        pb_raw = _nan_none(pb_raw)
+        roe = _nan_none(roe)
+
+        pe_v = pe_pct if pe_pct is not None else pe_raw
+        pb_v = pb_pct if pb_pct is not None else pb_raw
+        pe_str = (f"{float(pe_v):.0f}%" if pe_pct is not None else f"{float(pe_v):.1f}") if pe_v is not None else "-"
+        pb_str = (f"{float(pb_v):.0f}%" if pb_pct is not None else f"{float(pb_v):.2f}") if pb_v is not None else "-"
+        roe_str = f"{float(roe):.1f}%" if roe is not None else "-"
         score_str = f"{score:.3f}" if isinstance(score, float) else str(score)
 
         lines.append(f"| #{i} | {ticker} {name} | {score_str} | {pe_str} | {pb_str} | {roe_str} | {reason} |")

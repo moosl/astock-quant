@@ -175,16 +175,18 @@ def _build_value_picks(
 
         pe = pb = roe = None
         if raw is not None and ticker in raw.index:
+            import math as _math
             raw_row = raw.loc[ticker]
-            pe = raw_row.get("pe") if hasattr(raw_row, "get") else None
-            pb = raw_row.get("pb") if hasattr(raw_row, "get") else None
-            roe = raw_row.get("roe") if hasattr(raw_row, "get") else None
-            try:
-                pe = float(pe) if pe is not None else None
-                pb = float(pb) if pb is not None else None
-                roe = float(roe) if roe is not None else None
-            except (TypeError, ValueError):
-                pe = pb = roe = None
+            def _get_float(row: Any, key: str) -> float | None:
+                v = row.get(key) if hasattr(row, "get") else None
+                try:
+                    f = float(v) if v is not None else None
+                    return None if (f is not None and _math.isnan(f)) else f
+                except (TypeError, ValueError):
+                    return None
+            pe = _get_float(raw_row, "pe")
+            pb = _get_float(raw_row, "pb")
+            roe = _get_float(raw_row, "roe")
 
         # Auto-generate entry reason from sub-scores.
         # Scores are cross-sectional ranks (0=bottom, 1=top) within today's universe,
@@ -256,53 +258,25 @@ def _try_build_value_picks(
     report to show a placeholder instead of crashing.
     """
     try:
+        from astock_quant.factors.registry import compute_factor_frame
         from astock_quant.factors.value_score import compute_value_scores
         from astock_quant.data.dataset import prepare_stage1_data
 
-        factor_data = prepared_data
-        if factor_data is None:
-            factor_data = prepare_stage1_data(universe=universe)
-
-        prices = factor_data.get("prices") if factor_data else None
-        financials = factor_data.get("financials") if factor_data else None
-        if prices is None:
+        factor_data = prepared_data or prepare_stage1_data(universe=universe)
+        if factor_data is None or factor_data.get("prices") is None:
             return None
 
-        # Build a minimal factor DataFrame with pe, pb, roe if available
-        import pandas as _pd
-        rows = []
-        for ticker in universe:
-            price_df = prices.get(ticker) if isinstance(prices, dict) else None
-            fin = financials.get(ticker, {}) if isinstance(financials, dict) else {}
-            if price_df is None or (hasattr(price_df, "empty") and price_df.empty):
-                continue
-            # Use the last available row for this ticker
-            last = price_df.iloc[-1] if hasattr(price_df, "iloc") else {}
-            row = {
-                "pe": last.get("pe") if hasattr(last, "get") else None,
-                "pb": last.get("pb") if hasattr(last, "get") else None,
-                "roe": fin.get("roe") if fin else None,
-                "dividend_yield": last.get("dividend_yield") if hasattr(last, "get") else None,
-                "net_margin": fin.get("net_margin") if fin else None,
-                "gross_margin": fin.get("gross_margin") if fin else None,
-                "revenue_growth_yoy": fin.get("revenue_growth_yoy") if fin else None,
-                "net_profit_growth_yoy": fin.get("net_profit_growth_yoy") if fin else None,
-            }
-            date_idx = last.name if hasattr(last, "name") else _pd.Timestamp(date_str)
-            rows.append((_pd.Timestamp(date_idx), ticker, row))
-
-        if not rows:
-            return None
-
-        idx = _pd.MultiIndex.from_tuples([(r[0], r[1]) for r in rows], names=["date", "ticker"])
-        factor_df = _pd.DataFrame([r[2] for r in rows], index=idx)
-        factor_df = factor_df.apply(_pd.to_numeric, errors="coerce")
-
-        scores_df = compute_value_scores(factor_df)
+        factor_frame = compute_factor_frame(
+            price_panel=factor_data["prices"],
+            moneyflow_panel=factor_data.get("moneyflow"),
+            financials=factor_data.get("financials"),
+            drop_nan_threshold=1.1,
+        )
+        scores_df = compute_value_scores(factor_frame)
         if scores_df is None or (hasattr(scores_df, "empty") and scores_df.empty):
             return None
 
-        return _build_value_picks(scores_df, factor_df, date_str, top_n=20)
+        return _build_value_picks(scores_df, factor_frame, date_str, top_n=20)
 
     except Exception as e:  # noqa: BLE001
         logger.info("value_picks 构建跳过（T2 尚未就绪或数据不足）：%s", e)
