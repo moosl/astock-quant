@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import pickle
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -43,7 +44,6 @@ COST_OPTIMISTIC = {"commission_rate": 0.0003, "stamp_tax_rate": 0.0005, "slippag
 COST_STRESS = {"commission_rate": 0.0005, "stamp_tax_rate": 0.0005, "slippage_bps": 25.0}
 
 _INITIAL_CASH = 1_000_000.0
-CACHE_DIR = Path("data_cache")
 OUT_DIR = Path("artifacts/realistic_backtest")
 
 # --- 策略变体网格 ---
@@ -65,41 +65,21 @@ STRATEGY_VARIANTS = [
 # 沪深300 基准
 # ===========================================================================
 
-def load_hs300_benchmark(start, end) -> pd.Series | None:
-    """拉沪深300指数日收益率 Series（DatetimeIndex），带本地 cache.
+def compute_equal_weight_benchmark(price_panel: pd.DataFrame) -> pd.Series:
+    """用成分股 price_panel 合成「沪深300成分等权持有」基准日收益率.
 
-    返回 None 表示拉取失败 —— 验证继续，基准指标显示 N/A，不让整体挂掉。
+    不拉外部指数接口（akshare 指数源 Connection aborted 反爬已坏）—— 直接用
+    回测同一份行情数据合成。语义：「等权持有全部 300 只成分股」= 不选股的
+    baseline；策略（选股）必须跑赢它，才证明「选股」这件事本身有价值。
+
+    注：这是成分股**等权**，非市值加权的沪深300指数本身。但策略也是等权选股，
+    等权 vs 等权才是公平的「选股 vs 不选股」对照（比市值加权指数更严谨）。
     """
-    cache_path = CACHE_DIR / "hs300_index.csv"
-    df = None
-    if cache_path.exists():
-        try:
-            df = pd.read_csv(cache_path, parse_dates=["date"])
-        except Exception:  # noqa: BLE001
-            df = None
-    if df is None:
-        try:
-            import akshare as ak
-
-            raw = ak.index_zh_a_hist(
-                symbol="000300", period="daily",
-                start_date="20220101", end_date="20261231",
-            )
-            df = pd.DataFrame({
-                "date": pd.to_datetime(raw["日期"]),
-                "close": raw["收盘"].astype(float),
-            })
-            CACHE_DIR.mkdir(exist_ok=True)
-            df.to_csv(cache_path, index=False)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("拉沪深300指数失败，基准指标将显示 N/A：%s", e)
-            return None
-
-    df = df.sort_values("date").set_index("date")
-    s = df["close"].pct_change().dropna()
-    s = s[(s.index >= pd.Timestamp(start)) & (s.index <= pd.Timestamp(end))]
-    s.name = "hs300_return"
-    return s
+    close = price_panel["close"].unstack(level=1)  # → date × ticker 宽表
+    daily_ret = close.pct_change()
+    benchmark = daily_ret.mean(axis=1).dropna()  # 每天 = 全成分股收益等权平均
+    benchmark.name = "eqw_benchmark_return"
+    return benchmark
 
 
 # ===========================================================================
@@ -188,16 +168,16 @@ def run_one_strategy(variant: dict, predictions: list, price_panel: pd.DataFrame
 
 
 def run_benchmark_buy_and_hold(benchmark: pd.Series | None) -> dict:
-    """沪深300 买入持有基准."""
+    """沪深300成分等权持有基准."""
     if benchmark is None or len(benchmark) == 0:
-        return {"variant": "沪深300 买入持有", "total_return": None}
+        return {"variant": "沪深300成分等权持有", "total_return": None}
     total_return = float((1 + benchmark).prod() - 1)
     n_days = len(benchmark)
     annualized = float((1 + total_return) ** (252 / max(n_days, 1)) - 1)
     equity = (1 + benchmark).cumprod()
     drawdown = float((equity / equity.cummax() - 1).min())
     return {
-        "variant": "沪深300 买入持有（基准）",
+        "variant": "沪深300成分等权持有（基准）",
         "model": "benchmark",
         "total_return": round(total_return, 4),
         "annualized_return": round(annualized, 4),
@@ -255,6 +235,7 @@ def assemble_report(results: list[dict], benchmark_row: dict, meta: dict) -> str
         "## 验证设置",
         "",
         f"- 股票池：{meta['universe_size']} 只（沪深300成分）",
+        "- 基准：沪深300成分股「等权买入持有」（非市值加权指数本身 —— 等权策略 vs 等权基准更公平）",
         f"- 回测区间：{meta['bt_start']} ~ {meta['bt_end']}（约 {meta['n_months']} 个月，单次切分）",
         f"- 真实成本档：佣金 {REALISTIC_COST['commission_rate']*100:.3f}%（双边）"
         f" + 印花税 {REALISTIC_COST['stamp_tax_rate']*100:.3f}%（卖出）"
@@ -265,7 +246,7 @@ def assemble_report(results: list[dict], benchmark_row: dict, meta: dict) -> str
         "",
         "## 结果对照表",
         "",
-        "| 策略变体 | 总收益 | 年化 | 夏普 | 最大回撤 | 沪深300同期 | 年化超额 | 信息比率 | 交易数 | 累计成本占比 |",
+        "| 策略变体 | 总收益 | 年化 | 夏普 | 最大回撤 | 等权基准同期 | 年化超额 | 信息比率 | 交易数 | 累计成本占比 |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     # 基准行置顶
@@ -297,7 +278,7 @@ def assemble_report(results: list[dict], benchmark_row: dict, meta: dict) -> str
     ]
     lines.append(
         f"判定标准（真实成本下，三项全过才算「该变体可考虑」）："
-        f"总收益 > 沪深300同期 + 年化超额 > 0 + 信息比率 > 0.5。"
+        f"总收益 > 等权基准同期 + 年化超额 > 0 + 信息比率 > 0.5。"
     )
     if passed:
         lines.append("")
@@ -326,16 +307,30 @@ def main() -> None:
     t0 = time.time()
 
     universe = get_universe("stage4")
-    print(f"[1/4] 准备数据 + 拿 price_panel（{len(universe)} 只）...", flush=True)
-    data = prepare_stage1_data(universe=universe)
-    price_panel = data["prices"]
+    cache_file = OUT_DIR / "_backtest_cache.pkl"
 
-    print("[2/4] 跑 3 个 pipeline 拿验证集 predictions ...", flush=True)
-    preds_by_model: dict = {}
-    for name, fn in [("ranking", run_ranking), ("return", run_return), ("direction", run_direction)]:
-        r = fn(universe=universe, run_backtest=False, save_model_to=None, verbose=False)
-        preds_by_model[name] = r["predictions"]
-        print(f"    {name}: {len(r['predictions'])} 条 predictions", flush=True)
+    if cache_file.exists():
+        # 复用上次训练的 price_panel + predictions（删 _backtest_cache.pkl 可强制重训）。
+        # 注意：cache 绑定当时的模型/数据 —— 模型重训后须手动删 pkl 刷新。
+        print("[1-2/4] 从 cache 读 price_panel + predictions（删 pkl 可强制重训）...", flush=True)
+        with open(cache_file, "rb") as f:
+            cached = pickle.load(f)
+        price_panel = cached["price_panel"]
+        preds_by_model = cached["preds_by_model"]
+    else:
+        print(f"[1/4] 准备数据 + 拿 price_panel（{len(universe)} 只）...", flush=True)
+        data = prepare_stage1_data(universe=universe)
+        price_panel = data["prices"]
+
+        print("[2/4] 跑 3 个 pipeline 拿验证集 predictions ...", flush=True)
+        preds_by_model = {}
+        for name, fn in [("ranking", run_ranking), ("return", run_return), ("direction", run_direction)]:
+            r = fn(universe=universe, run_backtest=False, save_model_to=None, verbose=False)
+            preds_by_model[name] = r["predictions"]
+            print(f"    {name}: {len(r['predictions'])} 条 predictions", flush=True)
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        with open(cache_file, "wb") as f:
+            pickle.dump({"price_panel": price_panel, "preds_by_model": preds_by_model}, f)
 
     # 回测区间 = 所有 predictions 的日期并集
     all_dates = sorted({p.date for preds in preds_by_model.values() for p in preds})
@@ -345,8 +340,8 @@ def main() -> None:
     mask = (date_level >= pd.Timestamp(bt_start)) & (date_level <= pd.Timestamp(bt_end))
     price_panel_bt = price_panel[mask]
 
-    print(f"[3/4] 拉沪深300基准（{bt_start} ~ {bt_end}）...", flush=True)
-    benchmark = load_hs300_benchmark(bt_start, bt_end)
+    print("[3/4] 合成沪深300成分等权基准 ...", flush=True)
+    benchmark = compute_equal_weight_benchmark(price_panel_bt)
 
     print(f"[4/4] 跑 {len(STRATEGY_VARIANTS)} 个策略变体 ...", flush=True)
     results: list[dict] = []
