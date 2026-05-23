@@ -160,8 +160,11 @@ def _resolve_ticker(q: str) -> tuple[str, str] | None:
     try:
         import json as _json
         from pathlib import Path
-        # 复用 daily 的 cache 文件
-        cache_path = Path("data_cache") / "ticker_names_cache.json"
+        # 复用 daily 的 cache 文件 —— 用绝对路径, 避免 launchd 启动时 cwd 不在 PROJECT_ROOT
+        # services/ai_api/app.py → services/ai_api/ → services/ → PROJECT_ROOT
+        cache_path = (
+            Path(__file__).resolve().parent.parent.parent / "data_cache" / "ticker_names_cache.json"
+        )
         if cache_path.exists():
             mapping: dict[str, str] = _json.loads(cache_path.read_text(encoding="utf-8"))
             for code, name in mapping.items():
@@ -239,12 +242,20 @@ async def analyze(
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("analyze_stock crashed for %s", ticker)
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}") from e
+        # 不把 LLM SDK / Python 原始 exception 抛给前端 (避免泄漏内部信息)
+        raise HTTPException(
+            status_code=500,
+            detail="服务器内部错误,请稍后再试",
+        ) from e
 
     if not result.get("markdown"):
-        # LLM 失败兜底: stock_analyst._fallback_result 会把 markdown 设为 None
+        # LLM 失败兜底: 内部详情写日志, 前端只看 generic 信息
         err = result.get("error", "LLM 调用失败 (markdown 为空)")
-        raise HTTPException(status_code=502, detail=f"AI 分析失败: {err}")
+        logger.error("analyze_stock %s returned empty markdown: %s", ticker, err)
+        raise HTTPException(
+            status_code=502,
+            detail="AI 分析暂时不可用,请稍后再试",
+        )
 
     payload = {
         "ticker": result["ticker"],

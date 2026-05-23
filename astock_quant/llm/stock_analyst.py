@@ -110,7 +110,6 @@ def _fetch_endpoints_for_value(ticker: str) -> dict[str, Any]:
     顶层加一个 30s 总超时兜底. 任何端点失败返回该 key=空容器, 不抛崩.
     """
     from astock_data_skill import (
-        cls_telegraph,
         dividend_history,
         eastmoney_stock_info,
         eastmoney_stock_news,
@@ -135,11 +134,6 @@ def _fetch_endpoints_for_value(ticker: str) -> dict[str, Any]:
             except Exception as e:  # noqa: BLE001
                 logger.warning("fetch %s for %s failed: %s", name, ticker, e)
                 tasks[name] = {} if name in ("quote", "info") else []
-    # market context (北向资金) —— 单独一次, 不阻塞
-    try:
-        cls_telegraph  # imported, 暂不用避免无关延迟
-    except Exception:  # noqa: BLE001
-        pass
     return tasks
 
 

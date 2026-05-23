@@ -124,7 +124,10 @@ class TestAnalyzeErrors:
     def test_llm_failure_502(self, client, mock_analyze_fail):
         r = client.get("/api/analyze", params={"q": "600519"})
         assert r.status_code == 502
-        assert "AI 分析失败" in r.json()["detail"]
+        # 错误 detail 应是 generic 信息, 不泄漏 LLM SDK 原始 exception
+        detail = r.json()["detail"]
+        assert "AI 分析" in detail and "稍后再试" in detail
+        assert "API down" not in detail
 
 
 class TestAnalyzeCache:
