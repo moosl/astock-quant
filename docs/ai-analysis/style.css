@@ -82,7 +82,7 @@ body {
   gap: 0.7rem;
   align-items: stretch;
 }
-#query-input {
+#ai-query-input {
   flex: 1;
   min-width: 0;
   font-size: 1rem;
@@ -94,11 +94,11 @@ body {
   background: #fafafa;
   transition: border-color 0.15s, background 0.15s;
 }
-#query-input:focus {
+#ai-query-input:focus {
   border-color: #16a34a;
   background: #fff;
 }
-#analyze-btn {
+#ai-analyze-btn {
   background: #16a34a;
   color: #fff;
   border: none;
@@ -111,8 +111,8 @@ body {
   white-space: nowrap;
   transition: background 0.15s;
 }
-#analyze-btn:hover:not(:disabled) { background: #15803d; }
-#analyze-btn:disabled {
+#ai-analyze-btn:hover:not(:disabled) { background: #15803d; }
+#ai-analyze-btn:disabled {
   background: #9ca3af;
   cursor: not-allowed;
   opacity: 0.85;
@@ -376,7 +376,7 @@ body {
     flex-direction: column;
     gap: 0.6rem;
   }
-  #analyze-btn {
+  #ai-analyze-btn {
     padding: 0.7rem 0;
     width: 100%;
   }

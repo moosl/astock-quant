@@ -16,7 +16,7 @@
 
 <div class="container">
 
-  <div id="service-down-banner" class="service-down hidden">
+  <div id="ai-service-down" class="service-down hidden">
     <strong>⚠️ 服务暂未启动</strong>
     <div class="sd-detail">AI 分析后端当前不可用(可能 host Mac 离线)。当前网站静态部分(价值名单、每日报告)仍可正常访问。</div>
   </div>
@@ -24,14 +24,14 @@
   <div class="search-card">
     <div class="search-row">
       <input
-        id="query-input"
+        id="ai-query-input"
         type="text"
         placeholder="例如:600519、贵州茅台、成都银行"
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
       >
-      <button id="analyze-btn" type="button">分析</button>
+      <button id="ai-analyze-btn" type="button">分析</button>
     </div>
     <div class="hint">
       示例:<button class="example-chip" data-q="600519">600519</button>
@@ -41,7 +41,7 @@
     </div>
   </div>
 
-  <div id="loading" class="loading-card hidden">
+  <div id="ai-loading" class="loading-card hidden">
     <div class="spinner"></div>
     <div class="loading-text">
       <strong>⏳ 正在调用 28 个数据端点 → DeepSeek 分析中</strong>
@@ -49,12 +49,12 @@
     </div>
   </div>
 
-  <div id="error" class="error-card hidden">
-    <strong>⚠️ <span id="error-title">出错了</span></strong>
-    <div id="error-detail" class="error-detail"></div>
+  <div id="ai-error-box" class="error-card hidden">
+    <strong>⚠️ <span id="ai-error-title">出错了</span></strong>
+    <div id="ai-error-detail" class="error-detail"></div>
   </div>
 
-  <div id="result-wrapper" class="hidden">
+  <div id="ai-result-wrapper" class="hidden">
 
     <div class="disclaimer-banner">
       <strong>⚠️ 投资风险提示</strong>
@@ -66,19 +66,19 @@
 
     <div class="result-head">
       <div class="rh-title">
-        <span id="result-name">—</span>
-        <span id="result-ticker" class="rh-ticker">—</span>
+        <span id="ai-result-name">—</span>
+        <span id="ai-result-ticker" class="rh-ticker">—</span>
       </div>
     </div>
 
-    <div id="result-content" class="markdown-body"></div>
+    <div id="ai-result-content" class="markdown-body"></div>
 
     <div class="result-meta">
-      <span id="meta-time">—</span>
+      <span id="ai-meta-time">—</span>
       <span class="meta-sep">·</span>
-      <span id="meta-endpoints">调用端点 —</span>
+      <span id="ai-meta-endpoints">调用端点 —</span>
       <span class="meta-sep">·</span>
-      <span id="meta-tokens">tokens —</span>
+      <span id="ai-meta-tokens">tokens —</span>
     </div>
 
     <div class="disclaimer-footer">

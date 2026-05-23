@@ -18,20 +18,22 @@
     "REPLACE_WITH_TUNNEL_URL";
 
   // ---------- DOM ----------
-  const $input = document.getElementById("query-input");
-  const $btn = document.getElementById("analyze-btn");
-  const $loading = document.getElementById("loading");
-  const $error = document.getElementById("error");
-  const $errorTitle = document.getElementById("error-title");
-  const $errorDetail = document.getElementById("error-detail");
-  const $resultWrap = document.getElementById("result-wrapper");
-  const $resultName = document.getElementById("result-name");
-  const $resultTicker = document.getElementById("result-ticker");
-  const $resultContent = document.getElementById("result-content");
-  const $metaTime = document.getElementById("meta-time");
-  const $metaEndpoints = document.getElementById("meta-endpoints");
-  const $metaTokens = document.getElementById("meta-tokens");
-  const $serviceDown = document.getElementById("service-down-banner");
+  // 所有 id 加 ai- 前缀,避免被某些浏览器扩展(Sonner toast 等)
+  // 用 id="error" / id="loading" 等通用名注入样式,挤垮布局
+  const $input = document.getElementById("ai-query-input");
+  const $btn = document.getElementById("ai-analyze-btn");
+  const $loading = document.getElementById("ai-loading");
+  const $error = document.getElementById("ai-error-box");
+  const $errorTitle = document.getElementById("ai-error-title");
+  const $errorDetail = document.getElementById("ai-error-detail");
+  const $resultWrap = document.getElementById("ai-result-wrapper");
+  const $resultName = document.getElementById("ai-result-name");
+  const $resultTicker = document.getElementById("ai-result-ticker");
+  const $resultContent = document.getElementById("ai-result-content");
+  const $metaTime = document.getElementById("ai-meta-time");
+  const $metaEndpoints = document.getElementById("ai-meta-endpoints");
+  const $metaTokens = document.getElementById("ai-meta-tokens");
+  const $serviceDown = document.getElementById("ai-service-down");
   const $chips = document.querySelectorAll(".example-chip");
 
   // markdown-it 实例(打开 linkify / 表格 / 安全 HTML 关闭)
