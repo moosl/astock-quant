@@ -20,9 +20,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as _dt
 import json
 import logging
+import os
 import sys
 import time
 import traceback
@@ -34,6 +36,10 @@ from astock_quant.config.settings import SETTINGS
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_DIR = Path("artifacts/daily_reports")
+
+# LLM 集成开关 —— env var ENABLE_LLM_RATIONALE=0 可关掉 (CI/无 key 场景)
+# 默认开启;无 DEEPSEEK_API_KEY 时各 pick 会优雅降级到旧 reason
+ENABLE_LLM_RATIONALE = os.environ.get("ENABLE_LLM_RATIONALE", "1") not in ("0", "false", "False", "no")
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +316,84 @@ def _load_backtest_for_report(date_str: str, output_dir: Path) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# LLM 增强 —— 给每只 pick 写 llm_rationale + 生成市场综述
+# ---------------------------------------------------------------------------
+
+
+def _augment_with_llm(results: dict[str, Any], errors: list[str]) -> None:
+    """For each value pick, 并行调 LLM analyze_stock 写质性解读;
+    再调 market_overview 写市场速览. 全部失败也不抛崩.
+
+    失败的 pick: llm_rationale=None, 模板自动 fallback 回旧 reason.
+    """
+    picks = results.get("value_picks") or []
+    if not picks:
+        logger.info("LLM augment: no picks, skip")
+        return
+
+    try:
+        from astock_quant.llm.stock_analyst import analyze_stock, market_overview
+    except Exception as e:  # noqa: BLE001
+        logger.warning("LLM augment: import failed, skip: %s", e)
+        errors.append(f"llm_augment_import: {e}")
+        return
+
+    t_llm = time.time()
+
+    # Pick-level LLM 解读: 并行 (max_workers=8) —— 每只 ~5-8s, 总 ~30-40s for 20 picks
+    def _per_pick(pick: dict[str, Any]) -> tuple[str, str | None]:
+        ticker = str(pick.get("ticker", ""))
+        if not ticker:
+            return ticker, None
+        try:
+            result = analyze_stock(
+                ticker,
+                perspective="value",
+                depth="summary",
+                factor_context=pick,
+            )
+            return ticker, result.get("markdown")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("analyze_stock(%s) failed: %s", ticker, e)
+            return ticker, None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [ex.submit(_per_pick, p) for p in picks]
+        results_by_ticker: dict[str, str | None] = {}
+        for fut in concurrent.futures.as_completed(futures):
+            try:
+                tk, md = fut.result(timeout=90)
+                results_by_ticker[tk] = md
+            except Exception as e:  # noqa: BLE001
+                logger.warning("LLM pick future failed: %s", e)
+
+    succ = 0
+    for p in picks:
+        md = results_by_ticker.get(str(p.get("ticker", "")))
+        p["llm_rationale"] = md
+        if md:
+            succ += 1
+    logger.info("LLM augment: %d/%d picks 有 rationale, 耗时 %.1fs",
+                succ, len(picks), time.time() - t_llm)
+
+    if succ == 0:
+        errors.append("llm_augment: 0/20 picks 拿到 rationale (DEEPSEEK_API_KEY?)")
+
+    # Market overview —— 单次调用, 20s 内
+    t_mkt = time.time()
+    try:
+        mkt = market_overview(picks_summary=picks)
+        if mkt and mkt.get("markdown"):
+            results["llm_market_summary"] = mkt["markdown"]
+            logger.info("LLM market summary: 完成, 耗时 %.1fs", time.time() - t_mkt)
+        else:
+            logger.info("LLM market summary: 空, 跳过")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("market_overview failed: %s", e)
+        errors.append(f"llm_market_overview: {e}")
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -369,8 +453,15 @@ def run_daily_predict(
         ),
         # 回测结果：从 T4 artifact 读取；None 时报告显示占位提示
         "backtest": _load_backtest_for_report(date_str, output_dir),
+        # LLM 市场速览：用户友好的「今天市场速览」，None 时模板隐藏该 section
+        "llm_market_summary": None,
     }
-    # total_seconds 在 value_picks / backtest 算完后再刷新一次，反映真实耗时
+
+    # LLM 增强：给 Top 20 picks 写 llm_rationale，并生成市场综述。可关 / 失败兜底。
+    if ENABLE_LLM_RATIONALE:
+        _augment_with_llm(results, errors)
+
+    # total_seconds 在 value_picks / backtest / llm 算完后再刷新一次，反映真实耗时
     results["total_seconds"] = round(time.time() - t_total, 2)
 
     # JSON 落盘 —— 仅作当日运行记录（value_picks + 元数据 + errors）。

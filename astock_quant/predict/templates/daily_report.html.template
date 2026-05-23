@@ -96,6 +96,9 @@
     </ul>
   </div>
 
+  <!-- ===== 今日市场速览 (LLM 综述, 可选) ===== -->
+  $llm_market_summary_section
+
   <!-- ===== §1 本季度价值选股推荐名单 ===== -->
   <h2>§1 本季度价值选股推荐名单</h2>
   <div class="value-hero">

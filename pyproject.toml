@@ -22,6 +22,8 @@ dependencies = [
     "python-dateutil>=2.8",  # 日期处理
     "anthropic>=0.40",    # P6 LLM 情绪因子（默认 provider）—— 通过 ENABLE_LLM_FACTOR 开关
     "python-dotenv>=1.2.2",
+    "fastapi>=0.136.1",
+    "uvicorn>=0.47.0",
 ]
 
 [project.optional-dependencies]

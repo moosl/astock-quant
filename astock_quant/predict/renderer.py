@@ -77,6 +77,17 @@ def _render_today_summary(results: dict[str, Any]) -> dict[str, str]:
 # Value picks section — quarterly recommended buy list
 # ---------------------------------------------------------------------------
 
+def _pick_reason_text(pick: dict[str, Any]) -> tuple[str, bool]:
+    """选 reason 列展示内容: 优先 llm_rationale (AI 生成), fallback 旧 reason.
+
+    Returns (text, is_llm). is_llm=True 时模板加 🤖 标识 + 禁用 HTML 转义.
+    """
+    rationale = pick.get("llm_rationale")
+    if rationale and isinstance(rationale, str) and rationale.strip():
+        return rationale.strip(), True
+    return pick.get("reason", ""), False
+
+
 def _fmt_value_picks_html(value_picks: list[dict[str, Any]] | None) -> str:
     """Render quarterly value stock picks as HTML table."""
     if not value_picks:
@@ -107,13 +118,29 @@ def _fmt_value_picks_html(value_picks: list[dict[str, Any]] | None) -> str:
         pe_raw = pick.get("pe", None)
         pb_raw = pick.get("pb", None)
         roe = pick.get("roe", None)
-        reason = pick.get("reason", "")
+        reason_text, is_llm = _pick_reason_text(pick)
 
         import math
         pe_str = _fmt_val(pe_pct, pe_raw, is_pct=(pe_pct is not None and not (isinstance(pe_pct, float) and math.isnan(pe_pct))))
         pb_str = _fmt_val(pb_pct, pb_raw, is_pct=(pb_pct is not None and not (isinstance(pb_pct, float) and math.isnan(pb_pct))))
         roe_str = f"{float(roe):.1f}%" if roe is not None and not (isinstance(roe, float) and math.isnan(roe)) else "-"
         score_str = f"{score:.3f}" if isinstance(score, float) else str(score)
+
+        if is_llm:
+            # AI 生成: 显式 🤖 标 + 保留 markdown 换行 (用 <br> 替换), 限高滚动
+            from html import escape as _esc
+            safe_reason = _esc(reason_text).replace("\n", "<br>")
+            reason_html = (
+                f"<details style='font-size:0.88em;color:#333'>"
+                f"<summary style='cursor:pointer;color:#1a6e38;font-weight:bold'>"
+                f"🤖 AI 解读 (点击展开)</summary>"
+                f"<div style='margin-top:6px;max-height:240px;overflow-y:auto;"
+                f"padding:8px;background:#f8fcf8;border-left:3px solid #27ae60;"
+                f"border-radius:4px'>{safe_reason}</div>"
+                f"</details>"
+            )
+        else:
+            reason_html = f"<span style='color:#555;font-size:0.88em'>{reason_text}</span>"
 
         rows += (
             f"<tr>"
@@ -123,7 +150,7 @@ def _fmt_value_picks_html(value_picks: list[dict[str, Any]] | None) -> str:
             f"<td>{pe_str}</td>"
             f"<td>{pb_str}</td>"
             f"<td>{roe_str}</td>"
-            f"<td style='color:#555;font-size:0.88em'>{reason}</td>"
+            f"<td>{reason_html}</td>"
             f"</tr>\n"
         )
     return f"""<div class="card">
@@ -173,8 +200,41 @@ def _fmt_value_picks_md(value_picks: list[dict[str, Any]] | None) -> str:
         roe_str = f"{float(roe):.1f}%" if roe is not None else "-"
         score_str = f"{score:.3f}" if isinstance(score, float) else str(score)
 
-        lines.append(f"| #{i} | {ticker} {name} | {score_str} | {pe_str} | {pb_str} | {roe_str} | {reason} |")
+        reason_text, is_llm = _pick_reason_text(pick)
+        # MD 表格 cell 不能有换行 / | / 多行 markdown → 一律 squash 成单行
+        reason_md = reason_text.replace("|", "\\|").replace("\n", " ").strip()
+        if is_llm:
+            reason_md = f"🤖 {reason_md}"
+        # 限长避免 MD 表格炸开
+        if len(reason_md) > 200:
+            reason_md = reason_md[:197] + "..."
+
+        lines.append(f"| #{i} | {ticker} {name} | {score_str} | {pe_str} | {pb_str} | {roe_str} | {reason_md} |")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# LLM market summary section (今日市场速览)
+# ---------------------------------------------------------------------------
+
+
+def _fmt_market_summary_html(summary: str | None) -> str:
+    """渲染今日市场速览 (LLM 生成). None 时返回空 (模板隐藏 section)."""
+    if not summary or not isinstance(summary, str) or not summary.strip():
+        return ""
+    from html import escape as _esc
+    safe = _esc(summary).replace("\n", "<br>")
+    return f"""<div class="card" style="background:#f0f9ff;border-left:4px solid #1890ff">
+<h3 style="margin-top:0;color:#1890ff">🤖 今日市场速览 (AI 综述)</h3>
+<div style="font-size:0.95em;line-height:1.7;color:#333">{safe}</div>
+</div>"""
+
+
+def _fmt_market_summary_md(summary: str | None) -> str:
+    """MD 版今日市场速览. None 时返回空字符串."""
+    if not summary or not isinstance(summary, str) or not summary.strip():
+        return ""
+    return f"### 🤖 今日市场速览 (AI 综述)\n\n{summary.strip()}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +409,7 @@ def render(results: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
     accuracy = results.get("accuracy", None)
     value_picks = results.get("value_picks", None)
     backtest = results.get("backtest", None)
+    llm_market_summary = results.get("llm_market_summary", None)
 
     errors = results.get("errors", [])
     errors_summary = "无" if not errors else "; ".join(str(e) for e in errors)
@@ -376,6 +437,7 @@ def render(results: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
         "value_picks_section": _fmt_value_picks_html(value_picks),
         "backtest_section": _fmt_backtest_html(backtest),
         "accuracy_section": _fmt_accuracy_html(accuracy),
+        "llm_market_summary_section": _fmt_market_summary_html(llm_market_summary),
     })
     html_content = Template(html_tpl).safe_substitute(html_subs)
     html_path = output_dir / f"daily_report_{report_date}.html"
@@ -388,6 +450,7 @@ def render(results: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
         "value_picks_section": _fmt_value_picks_md(value_picks),
         "backtest_section": _fmt_backtest_md(backtest),
         "accuracy_section": _fmt_accuracy_md(accuracy),
+        "llm_market_summary_section": _fmt_market_summary_md(llm_market_summary),
     })
     md_content = Template(md_tpl).safe_substitute(md_subs)
     md_path = output_dir / f"daily_report_{report_date}.md"
