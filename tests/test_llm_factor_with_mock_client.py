@@ -435,11 +435,10 @@ def test_registry_enabled_with_env_var(monkeypatch):
 # 6. 工厂 / Protocol / 解析 helper
 # ===========================================================================
 
-def test_make_llm_client_missing_api_key(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_make_llm_client_defaults_to_codex(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    with pytest.raises(LLMClientError, match="ANTHROPIC_API_KEY"):
-        make_llm_client()
+    from astock_quant.llm import CodexCLIClient
+    assert isinstance(make_llm_client(), CodexCLIClient)
 
 
 def test_make_llm_client_unknown_provider():

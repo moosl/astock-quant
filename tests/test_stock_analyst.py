@@ -61,12 +61,12 @@ def mock_endpoints():
 
 @pytest.fixture
 def mock_llm_client():
-    """模拟 DeepSeek client.chat() 返回."""
+    """模拟 Codex CLI client.chat() 返回."""
     client = MagicMock()
     client.chat.return_value = LLMResponse(
         content="这是一段 AI 生成的价值分析。\n\n估值水平偏低, ROE 行业第一。",
         usage={"input_tokens": 500, "output_tokens": 200},
-        model="deepseek-v4-pro",
+        model="codex-default",
     )
     return client
 

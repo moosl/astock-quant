@@ -10,10 +10,10 @@
 - 下游 labels / models / backtest / signals **一行都不用改**
 
 LLM 情绪因子开关（Stage 2 P6）：
-- 默认 **不启用** —— 因为要 LLM API key 且每次跑都烧 token。
+- 默认 **不启用** —— 因为每次运行都会消耗 LLM token。
 - 环境变量 `ENABLE_LLM_FACTOR=1` 时，default_factors() 会在尾部追加 LLMNewsSentiment()。
-- 启用前还要设 `ANTHROPIC_API_KEY`（默认 provider）或切到自己的 provider。详见
-  `factors/llm_factor.py` 模块 docstring 的「启用方式」。
+- 默认通过本机已登录的 Codex CLI 运行。详见 `factors/llm_factor.py` 模块 docstring
+  的「启用方式」。
 
 使用：
     from astock_quant.factors.registry import compute_factor_frame

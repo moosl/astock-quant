@@ -6,7 +6,8 @@
 ## 启动方式
 
 ```bash
-# 主项目 .env 里需有 DEEPSEEK_API_KEY
+# 先确认本机 Codex CLI 已登录
+codex login status
 cd "/Users/wujiangjingcai/claude code/量化"
 
 # 加载 env (项目 .env)
@@ -27,7 +28,7 @@ uv run uvicorn services.ai_api.app:app --host 127.0.0.1 --port 8000
 
 ```bash
 curl http://127.0.0.1:8000/api/health
-# {"status":"ok","model":"deepseek-v4-pro","version":"1.0.0"}
+# {"status":"ok","model":"codex-default","version":"1.0.0"}
 ```
 
 ### `GET /api/analyze`

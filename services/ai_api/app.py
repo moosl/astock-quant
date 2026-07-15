@@ -31,12 +31,13 @@ VERSION = "1.0.0"
 app = FastAPI(
     title="A股 AI 个股分析 API",
     version=VERSION,
-    description="基于 DeepSeek + SKILL adapter 的个股价值分析后端. 不构成投资建议.",
+    description="基于 Codex CLI + SKILL adapter 的个股价值分析后端. 不构成投资建议.",
 )
 
 # CORS —— 允许 GitHub Pages + 本地开发
 ALLOWED_ORIGINS = [
     "https://betzaydarobie-source.github.io",
+    "https://moosl.github.io",
     "http://localhost",
     "http://localhost:8000",
     "http://localhost:3000",
@@ -188,7 +189,7 @@ def _resolve_ticker(q: str) -> tuple[str, str] | None:
 @app.get("/api/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     """健康检查 + 模型版本."""
-    model = os.environ.get("LLM_MODEL") or "deepseek-v4-pro"
+    model = os.environ.get("LLM_MODEL") or "codex-default"
     return HealthResponse(status="ok", model=model, version=VERSION)
 
 

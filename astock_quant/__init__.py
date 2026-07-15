@@ -12,7 +12,7 @@
 
 —— 包级 .env 自动加载 ——
 任何 `import astock_quant` 的入口（pipeline / tests / LLM 模块）都会自动从项目根
-读取 `.env`，把 DEEPSEEK_API_KEY / LLM_PROVIDER / ENABLE_LLM_FACTOR 等注入 os.environ。
+读取 `.env`，把 Codex CLI / LLM_PROVIDER / ENABLE_LLM_FACTOR 等配置注入 os.environ。
 设计选择：
 - `override=False`：CI / shell 里已 export 的 env var 优先于 .env（生产覆盖本地）
 - try/except 兜底：python-dotenv 没装也不挂（向后兼容老环境）

@@ -320,7 +320,7 @@ def build_index() -> None:
     <div class="ai-entry-body">
       <div class="ai-entry-title">AI 个股分析 <span class="ai-entry-new">NEW</span></div>
       <div class="ai-entry-desc">
-        输入股票代码或中文名 → AI 调 28 个数据端点 + DeepSeek 实时分析<br>
+        输入股票代码或中文名 → AI 调 28 个数据端点 + Codex CLI 实时分析<br>
         <span class="ai-entry-disclaimer">⚠️ 仅供学习研究，不构成任何投资建议</span>
       </div>
     </div>

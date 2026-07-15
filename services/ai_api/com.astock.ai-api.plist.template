@@ -5,7 +5,7 @@
   使用方法 (由 team-lead 配):
     1. 把 {{PROJECT_ROOT}} 替换为绝对路径 (e.g. /Users/wujiangjingcai/claude code/量化)
     2. 把 {{HOME}} 替换为 $HOME
-    3. 把 {{DEEPSEEK_API_KEY}} 替换为真实 key (或继续走项目 .env, 让 uv 自动加载)
+    3. 确认 `codex login status` 已登录（服务复用本机登录态）
     4. 复制到 ~/Library/LaunchAgents/com.astock.ai-api.plist
     5. launchctl load ~/Library/LaunchAgents/com.astock.ai-api.plist
     6. launchctl start com.astock.ai-api
@@ -42,13 +42,18 @@
   <dict>
     <key>PATH</key>
     <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <!-- DEEPSEEK_API_KEY: 优先 launchd env, 否则走项目 .env (uv run 会加载) -->
-    <!--
-    <key>DEEPSEEK_API_KEY</key>
-    <string>{{DEEPSEEK_API_KEY}}</string>
-    -->
     <key>LLM_PROVIDER</key>
-    <string>deepseek</string>
+    <string>codex</string>
+    <key>CODEX_IGNORE_USER_CONFIG</key>
+    <string>true</string>
+    <key>CODEX_PROJECT_DOC_MAX_BYTES</key>
+    <string>0</string>
+    <key>CODEX_DISABLE_LOCAL_SKILLS</key>
+    <string>true</string>
+    <key>CODEX_ISOLATE_WORKDIR</key>
+    <string>true</string>
+    <key>CODEX_REASONING_EFFORT</key>
+    <string>medium</string>
   </dict>
 
   <key>RunAtLoad</key>

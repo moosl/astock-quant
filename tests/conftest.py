@@ -2,7 +2,7 @@
 
 为什么需要：
 - `astock_quant/__init__.py` 在 package import 时自动 load `.env`（Stage 2 P6/P7 跑 LLM 因子的便利设计）
-- 但开发机 `.env` 通常会有 `ENABLE_LLM_FACTOR=1` / `DEEPSEEK_API_KEY=sk-...` / `LLM_PROVIDER=deepseek`
+- 但开发机 `.env` 通常会启用 Codex CLI 或其他真实 provider
 - 测试默认必须跑在「无 LLM」基线（避免误打真实 API 烧钱、保持 default_factors() 数量稳定、保持 fail-loud 行为可测）
 - 需要 LLM 行为的测试自己用 `monkeypatch.setenv` 显式打开（`test_llm_factor_with_mock_client.py` 已是这模式）
 
@@ -24,6 +24,14 @@ _LLM_ENV_VARS_TO_ISOLATE = (
     "ANTHROPIC_BASE_URL",
     "DEEPSEEK_API_KEY",
     "DEEPSEEK_BASE_URL",
+    "CODEX_BIN",
+    "CODEX_CLI_HOME",
+    "CODEX_EXEC_TIMEOUT",
+    "CODEX_IGNORE_USER_CONFIG",
+    "CODEX_PROJECT_DOC_MAX_BYTES",
+    "CODEX_DISABLE_LOCAL_SKILLS",
+    "CODEX_ISOLATE_WORKDIR",
+    "CODEX_REASONING_EFFORT",
 )
 
 

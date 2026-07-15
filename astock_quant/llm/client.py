@@ -1,16 +1,16 @@
-"""LLM 客户端抽象 + Anthropic Claude 默认实现 + 工厂函数.
+"""LLM 客户端抽象 + 多 provider 实现 + 工厂函数.
 
 设计目标（方案 A 瘦身版）：
 - 用 typing.Protocol 抽象一个**最小**客户端接口（chat / chat_json）—— 不继承 ABC，
   任何实现这俩方法的类都自动满足 Protocol。
-- 默认 provider 是 Anthropic Claude（直接用 `anthropic` 官方 SDK，**不引 langchain**）。
+- 默认 provider 是本机 Codex CLI（复用登录态，不需要模型 API key）。
 - 切 OpenAI / DeepSeek / Kimi 等只需新增一个 implementer class + factory 里加一行，
   调用方一律走 `make_llm_client(provider)`。
 - 结构化输出 helper：让 LLM 吐 JSON，Pydantic 解析；失败时 fail loud（让因子层决定怎么处理）。
 
 API key 安全：
 - 一律从 env var 读，**绝不**硬编码、**绝不**写进 docstring 示例。
-- 没设 env var 时构造 client 报 LLMClientError —— 上游决定降级 / 跳过。
+- Codex CLI 复用本机登录态；兼容 provider 缺 key 时由上游决定降级 / 跳过。
 
 参考代码：.p0-repos/TradingAgents-astock/llm_clients/ 的多供应商抽象（重抽 langchain
 ChatModel 兼容层；我们这层瘦身得只剩两个方法）。
@@ -263,7 +263,7 @@ def parse_json_to_schema(text: str, schema: type[T]) -> T:
 # 工厂
 # ===========================================================================
 
-# 支持的 provider 注册表 —— Stage 2 Anthropic 就够用；新增 provider 只在这加一行
+# 支持的 provider 注册表；Codex CLI 在文件末尾注册，避免循环 import。
 _PROVIDERS: dict[str, type] = {
     "anthropic": AnthropicClient,
 }
@@ -273,20 +273,20 @@ def make_llm_client(provider: str | None = None, **kwargs) -> LLMClient:
     """LLM 客户端工厂.
 
     参数：
-        provider: provider 名（"anthropic" / 后续可扩 "openai" / "deepseek" / "kimi"）。
-                 None 时读 env var `LLM_PROVIDER`，仍为 None 则默认 "anthropic"。
+        provider: provider 名（"codex" / "anthropic" / "deepseek"）。
+                 None 时读 env var `LLM_PROVIDER`，仍为 None 则默认 "codex"。
         kwargs:  透传给具体 client 构造函数（model / api_key / base_url 等）。
 
     抛 LLMClientError：provider 不支持、API key 未设置、SDK 未安装。
 
     用法：
-        # 默认 Anthropic + env var ANTHROPIC_API_KEY + 默认模型
+        # 默认 Codex CLI，复用本机登录态
         client = make_llm_client()
 
         # 显式指定 provider 和模型
         client = make_llm_client("anthropic", model="claude-opus-4-7")
     """
-    p = (provider or os.environ.get("LLM_PROVIDER") or "anthropic").lower()
+    p = (provider or os.environ.get("LLM_PROVIDER") or "codex").lower()
     impl_cls = _PROVIDERS.get(p)
     if impl_cls is None:
         raise LLMClientError(
@@ -321,5 +321,7 @@ __all__ = [
 #
 # 这是 P7 启用的 provider；anthropic 的注册保持在上方原位置不动（向后兼容）。
 from astock_quant.llm.deepseek import DeepSeekClient  # noqa: E402
+from astock_quant.llm.codex_cli import CodexCLIClient  # noqa: E402
 
 _PROVIDERS["deepseek"] = DeepSeekClient
+_PROVIDERS["codex"] = CodexCLIClient

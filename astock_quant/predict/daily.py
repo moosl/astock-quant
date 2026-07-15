@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_OUTPUT_DIR = Path("artifacts/daily_reports")
 
 # LLM 集成开关 —— env var ENABLE_LLM_RATIONALE=0 可关掉 (CI/无 key 场景)
-# 默认开启;无 DEEPSEEK_API_KEY 时各 pick 会优雅降级到旧 reason
+# 默认开启；Codex CLI 不可用时各 pick 会优雅降级到旧 reason
 ENABLE_LLM_RATIONALE = os.environ.get("ENABLE_LLM_RATIONALE", "1") not in ("0", "false", "False", "no")
 
 
@@ -377,7 +377,7 @@ def _augment_with_llm(results: dict[str, Any], errors: list[str]) -> None:
                 succ, len(picks), time.time() - t_llm)
 
     if succ == 0:
-        errors.append("llm_augment: 0/20 picks 拿到 rationale (DEEPSEEK_API_KEY?)")
+        errors.append("llm_augment: 0/20 picks 拿到 rationale (Codex CLI 可用/已登录?)")
 
     # Market overview —— 单次调用, 20s 内
     t_mkt = time.time()

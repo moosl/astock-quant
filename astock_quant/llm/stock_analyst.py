@@ -1,8 +1,8 @@
-"""LLM 个股价值分析层 —— 调用 DeepSeek 写质性解读 + 市场综述.
+"""LLM 个股价值分析层 —— 调用 Codex CLI 写质性解读 + 市场综述.
 
 设计思路:
 - 选股仍由 value_score.py 数学公式(诚信红线), 这里只写「人话解读」.
-- SKILL adapter (astock_data_skill) 拉 6-8 个端点, 数据 → prompt → DeepSeek → markdown.
+- SKILL adapter (astock_data_skill) 拉 6-8 个端点, 数据 → prompt → Codex CLI → markdown.
 - 失败兜底: 端点失败返回空, LLM 挂返回 fallback dict (llm_rationale=None).
 - 所有输出含「AI 生成 / 不构成投资建议」disclaimer.
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
     "\n\n---\n"
-    "⚠️ **本分析为 AI 生成 (DeepSeek), 基于公开数据自动整理, 不构成投资建议。** "
+    "⚠️ **本分析为 AI 生成 (Codex CLI), 基于公开数据自动整理, 不构成投资建议。** "
     "选股仍由数学公式打分, AI 仅写解读。回测跑赢不等于实盘赚钱。"
 )
 
@@ -88,14 +88,14 @@ MARKET_SYSTEM_PROMPT = """你是一位 A 股市场策略师。根据提供的当
 
 
 # ===========================================================================
-# DeepSeek client (延迟实例化, 测试可注入 mock)
+# Codex CLI client (延迟实例化, 测试可注入 mock)
 # ===========================================================================
 
 
 def _make_client():
-    """创建 DeepSeek 客户端. 单独函数方便测试 monkeypatch."""
+    """创建 Codex CLI 客户端. 单独函数方便测试 monkeypatch."""
     from astock_quant.llm.client import make_llm_client
-    return make_llm_client("deepseek")
+    return make_llm_client("codex")
 
 
 # ===========================================================================
