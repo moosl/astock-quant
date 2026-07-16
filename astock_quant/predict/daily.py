@@ -232,7 +232,10 @@ def _try_build_value_picks(
         from astock_quant.factors.value_score import compute_value_scores
         from astock_quant.data.dataset import prepare_stage1_data
 
-        factor_data = prepared_data or prepare_stage1_data(universe=universe)
+        factor_data = prepared_data or prepare_stage1_data(
+            universe=universe,
+            include_moneyflow=False,
+        )
         if factor_data is None or factor_data.get("prices") is None:
             return None
 
@@ -432,7 +435,10 @@ def run_daily_predict(
     try:
         from astock_quant.data.dataset import prepare_stage1_data
         t_prep = time.time()
-        prepared_data = prepare_stage1_data(universe=universe)
+        prepared_data = prepare_stage1_data(
+            universe=universe,
+            include_moneyflow=False,
+        )
         logger.info("prepare_stage1_data: OK (%.2fs)", time.time() - t_prep)
     except Exception as e:  # noqa: BLE001
         logger.warning("prepare_stage1_data 失败，value_picks 将再尝试拉一次：%s", e)

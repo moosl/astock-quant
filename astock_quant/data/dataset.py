@@ -290,6 +290,7 @@ def prepare_stage1_data(
     universe: list[str] | None = None,
     force_refresh: bool = False,
     stage: str = "stage1",
+    include_moneyflow: bool = True,
 ) -> dict:
     """一键准备数据集 —— 行情 panel + 资金流 panel + 财务字典.
 
@@ -300,6 +301,8 @@ def prepare_stage1_data(
         stage:          "stage1" → 30 只蓝筹（默认，向后兼容）；
                         "stage4" → 沪深 300 全量（lazy 拉取）。
                         universe 显式传入时本参数无效。
+        include_moneyflow: 是否加载资金流。默认 True，保留旧预测 pipeline 行为；
+                           价值名单不使用资金流评分，可传 False 跳过不稳定的外部接口。
 
     其余配置（起止日期）走 SETTINGS。curr_date=None（全量，给离线训练）。
 
@@ -318,7 +321,15 @@ def prepare_stage1_data(
                 stage, len(effective_universe), SETTINGS.history_start, SETTINGS.history_end)
 
     prices = build_price_panel(universe=effective_universe, source=source, force_refresh=force_refresh)
-    moneyflow = build_moneyflow_panel(universe=effective_universe, source=source, force_refresh=force_refresh)
+    moneyflow = (
+        build_moneyflow_panel(
+            universe=effective_universe,
+            source=source,
+            force_refresh=force_refresh,
+        )
+        if include_moneyflow
+        else pd.DataFrame()
+    )
     financials = load_financials(universe=effective_universe, source=source)
 
     return {

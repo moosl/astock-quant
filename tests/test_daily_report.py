@@ -181,12 +181,14 @@ class TestRunDailyPredict:
         assert len(html_files) == 0, f"--no-render 下不应有 HTML: {html_files}"
 
     def test_prepare_stage1_data_called_once(self, tmp_path):
-        """prepare_stage1_data 在一次运行里只调 1 次（数据共享，不重拉）。"""
+        """每日名单只准备一次数据，并明确跳过资金流。"""
         prepare_call_count = [0]
+        include_moneyflow_values = []
         fake_data = {"prices": object(), "moneyflow": None, "financials": {}}
 
-        def mock_prepare(universe=None, force_refresh=False):
+        def mock_prepare(universe=None, force_refresh=False, include_moneyflow=True):
             prepare_call_count[0] += 1
+            include_moneyflow_values.append(include_moneyflow)
             return fake_data
 
         with patch("astock_quant.data.dataset.prepare_stage1_data", side_effect=mock_prepare), \
@@ -202,6 +204,44 @@ class TestRunDailyPredict:
 
         assert prepare_call_count[0] <= 1, \
             f"prepare_stage1_data 被调了 {prepare_call_count[0]} 次，应该 <= 1 次"
+        assert include_moneyflow_values == [False]
+
+    def test_prepare_stage1_data_can_skip_moneyflow(self):
+        """include_moneyflow=False 时不触发资金流外部接口。"""
+        import pandas as pd
+        from astock_quant.data.dataset import prepare_stage1_data
+
+        price_panel = pd.DataFrame({"close": [1.0]})
+        with patch("astock_quant.data.dataset.build_price_panel", return_value=price_panel), \
+             patch("astock_quant.data.dataset.build_moneyflow_panel") as build_moneyflow, \
+             patch("astock_quant.data.dataset.load_financials", return_value={}):
+            result = prepare_stage1_data(
+                universe=["600519"],
+                include_moneyflow=False,
+            )
+
+        build_moneyflow.assert_not_called()
+        assert result["moneyflow"].empty
+
+    def test_value_pick_fallback_skips_moneyflow(self):
+        """首次数据准备失败后的兜底也不能重新拉资金流。"""
+        from astock_quant.predict.daily import _try_build_value_picks
+
+        with patch(
+            "astock_quant.data.dataset.prepare_stage1_data",
+            return_value={"prices": None},
+        ) as prepare:
+            result = _try_build_value_picks(
+                universe=["600519"],
+                date_str="2026-05-16",
+                prepared_data=None,
+            )
+
+        assert result is None
+        prepare.assert_called_once_with(
+            universe=["600519"],
+            include_moneyflow=False,
+        )
 
 
 # ---------------------------------------------------------------------------
