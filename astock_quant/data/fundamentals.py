@@ -52,6 +52,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -62,6 +63,10 @@ from astock_quant.data import cache as data_cache
 from astock_quant.data.astock_source import normalize_ticker
 
 logger = logging.getLogger(__name__)
+
+_DIVIDEND_MAX_ATTEMPTS = 3
+_DIVIDEND_REQUEST_INTERVAL_SECONDS = 0.5
+_DIVIDEND_RETRY_BASE_SECONDS = 1.0
 
 # 同花顺 stock_financial_abstract_ths（按报告期）中文列名 → FinancialMetrics 字段
 _THS_COL_MAP: dict[str, str] = {
@@ -347,8 +352,43 @@ def _fetch_dividends(code: str) -> dict[str, float]:
     """
     try:
         import akshare as ak
+    except Exception as e:  # noqa: BLE001
+        logger.warning("东财分红接口不可用 %s: %s", code, e)
+        return {}
 
-        d = ak.stock_fhps_detail_em(symbol=code)
+    d = None
+    last_error: Exception | None = None
+    for attempt in range(1, _DIVIDEND_MAX_ATTEMPTS + 1):
+        # 沪深 300 批量刷新时主动降速，避免连续请求触发东财限流。
+        time.sleep(_DIVIDEND_REQUEST_INTERVAL_SECONDS)
+        try:
+            d = ak.stock_fhps_detail_em(symbol=code)
+            last_error = None
+            break
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            if attempt < _DIVIDEND_MAX_ATTEMPTS:
+                delay = _DIVIDEND_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.info(
+                    "东财分红拉取失败 %s（第 %d/%d 次），%.1fs 后重试: %s",
+                    code,
+                    attempt,
+                    _DIVIDEND_MAX_ATTEMPTS,
+                    delay,
+                    e,
+                )
+                time.sleep(delay)
+
+    if last_error is not None:
+        logger.warning(
+            "东财分红拉取失败 %s（已重试 %d 次）: %s",
+            code,
+            _DIVIDEND_MAX_ATTEMPTS,
+            last_error,
+        )
+        return {}
+
+    try:
         if d is None or d.empty or "报告期" not in d.columns:
             return {}
         col_ratio = "现金分红-现金分红比例"
@@ -369,7 +409,7 @@ def _fetch_dividends(code: str) -> dict[str, float]:
             out[rp] = dps
         return out
     except Exception as e:  # noqa: BLE001
-        logger.warning("东财分红拉取失败 %s: %s", code, e)
+        logger.warning("东财分红数据解析失败 %s: %s", code, e)
         return {}
 
 
