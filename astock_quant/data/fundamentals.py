@@ -58,6 +58,7 @@ import pandas as pd
 
 from astock_quant.config.settings import SETTINGS
 from astock_quant.contracts import FinancialMetrics
+from astock_quant.data import cache as data_cache
 from astock_quant.data.astock_source import normalize_ticker
 
 logger = logging.getLogger(__name__)
@@ -458,22 +459,30 @@ def load_financial_history(
     ticker: str,
     force_refresh: bool = False,
 ) -> list[FinancialMetrics]:
-    """拿单只票全历史财报 —— 优先读缓存，无缓存 / 强制刷新则拉网络并落盘.
+    """拿单只票全历史财报 —— 当天读缓存，跨天自动刷新.
 
-    财报一季度才更新一次、且历史值不会变（已披露的财报是定稿），所以缓存只要
-    存在就一直有效 —— 不像行情有「当天有效」的时效判断。要更新（季度有新财报
-    披露后）用 `force_refresh=True`，或直接删缓存文件。
+    新财报可能在任一交易日披露，因此缓存按自然日刷新一次。网络失败时返回旧缓存，
+    避免一次数据源抖动让每日名单缺失整只股票。
     """
     code = normalize_ticker(ticker)
-    if not force_refresh:
-        cached = read_cache(code)
-        if cached is not None and len(cached) > 0:
-            return cached
+    path = cache_path(code)
+    cached = read_cache(code)
+    if (
+        not force_refresh
+        and cached is not None
+        and len(cached) > 0
+        and data_cache.is_fresh(path)
+    ):
+        return cached
 
     records = fetch_financial_history(code)
     if records:
         write_cache(records, code)
-    return records
+        return records
+    if cached:
+        logger.warning("财报刷新失败 %s，回退旧缓存", code)
+        return cached
+    return []
 
 
 # ===========================================================================

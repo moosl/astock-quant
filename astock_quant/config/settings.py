@@ -242,7 +242,9 @@ class Settings:
     # 注意：mootdx bars 单次最多取 ~800 根日线（约 3.2 年），astock_source
     # 需要分段翻页才能覆盖到 history_start —— 详见 astock_source 的 get_prices 实现。
     history_start: str = "2022-01-01"
-    history_end: str = "2026-05-15"  # 当前日期（数据拉取上界）
+    history_end: str = field(
+        default_factory=lambda: datetime.now().date().isoformat()
+    )  # 运行当天（数据拉取上界）
 
     # —— 路径 ——
     project_root: Path = _PROJECT_ROOT

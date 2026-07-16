@@ -47,6 +47,8 @@ from astock_quant.data.protocol import DataSource
 
 logger = logging.getLogger(__name__)
 
+_MAX_FRESH_PRICE_LAG = pd.Timedelta(days=10)
+
 
 # ---------------------------------------------------------------------------
 # 单只票：拉取 + 落地（带缓存判断）
@@ -73,6 +75,17 @@ def _moneyflow_to_df(records: list) -> pd.DataFrame:
     return pd.DataFrame([r.model_dump() for r in records])
 
 
+def _merge_price_frames(*frames: pd.DataFrame) -> pd.DataFrame:
+    """合并行情缓存与增量数据，按 (ticker, date) 去重并升序。"""
+    valid = [frame for frame in frames if frame is not None and not frame.empty]
+    if not valid:
+        return _bars_to_df([])
+    merged = pd.concat(valid, ignore_index=True)
+    merged["date"] = pd.to_datetime(merged["date"])
+    merged = merged.drop_duplicates(subset=["ticker", "date"], keep="last")
+    return merged.sort_values(["date", "ticker"]).reset_index(drop=True)
+
+
 def load_prices(
     ticker: str,
     source: DataSource,
@@ -80,26 +93,68 @@ def load_prices(
     end_date: str,
     force_refresh: bool = False,
 ) -> pd.DataFrame:
-    """拿到单只票的「全量历史」行情 DataFrame，带缓存.
+    """拿到单只票的「全量历史」行情 DataFrame，带增量缓存.
 
-    缓存新鲜且非强制刷新 → 读 CSV；否则走 source 重拉并落地。
-    返回的是全量历史（未按 curr_date 截断）—— 截断由 build_*_panel 统一做。
+    当天已更新 → 直接读缓存；跨天后只拉缓存尚未覆盖的头尾区间，合并去重后落地。
+    force_refresh=True 才重拉完整请求区间。网络失败时回退已有缓存。
+    返回全量历史（未按 curr_date 截断）—— 截断由 build_*_panel 统一做。
     """
     code = normalize_ticker(ticker)
     path = cache.cache_path("prices", code)
+    cached = cache.read_cache("prices", code)
+    requested_start = pd.to_datetime(start_date).normalize()
+    requested_end = pd.to_datetime(end_date).normalize()
 
-    if not force_refresh and cache.is_fresh(path):
-        df = cache.read_cache("prices", code)  # 不传 curr_date = 全量
-        if df is not None and not df.empty:
-            return df
+    if not force_refresh and cache.is_fresh(path) and cached is not None and not cached.empty:
+        cached_dates = pd.to_datetime(cached["date"])
+        covers_start = cached_dates.min().normalize() <= requested_start
+        end_lag = requested_end - cached_dates.max().normalize()
+        if covers_start and end_lag <= _MAX_FRESH_PRICE_LAG:
+            return cached
 
-    # 重拉 + 落地
-    bars = source.get_prices(code, start_date, end_date)
-    df = _bars_to_df(bars)
-    if not df.empty:
-        cache.write_cache(df, "prices", code)
-        df["date"] = pd.to_datetime(df["date"])
-    return df
+    ranges: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+
+    if force_refresh or cached is None or cached.empty:
+        ranges.append((requested_start, requested_end))
+    else:
+        cached_dates = pd.to_datetime(cached["date"])
+        cached_start = cached_dates.min().normalize()
+        cached_end = cached_dates.max().normalize()
+        one_day = pd.Timedelta(days=1)
+        if requested_start < cached_start:
+            ranges.append((requested_start, min(requested_end, cached_start - one_day)))
+        if requested_end > cached_end:
+            ranges.append((max(requested_start, cached_end + one_day), requested_end))
+
+    fetched_frames: list[pd.DataFrame] = []
+    for range_start, range_end in ranges:
+        if range_start > range_end:
+            continue
+        logger.debug(
+            "load_prices 增量拉取 %s: %s ~ %s",
+            code,
+            range_start.date(),
+            range_end.date(),
+        )
+        bars = source.get_prices(
+            code,
+            range_start.date().isoformat(),
+            range_end.date().isoformat(),
+        )
+        frame = _bars_to_df(bars)
+        if not frame.empty:
+            fetched_frames.append(frame)
+
+    if not fetched_frames:
+        return cached if cached is not None else _bars_to_df([])
+
+    if force_refresh:
+        merged = _merge_price_frames(*fetched_frames)
+    else:
+        merged = _merge_price_frames(cached, *fetched_frames)
+    cache.write_cache(merged, "prices", code)
+    merged["date"] = pd.to_datetime(merged["date"])
+    return merged
 
 
 def load_moneyflow(
